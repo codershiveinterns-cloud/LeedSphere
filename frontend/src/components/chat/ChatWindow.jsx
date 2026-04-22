@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { useOutletContext } from 'react-router-dom';
+import { useOutletContext, useParams } from 'react-router-dom';
 import { Hash, Info } from 'lucide-react';
 import useAppStore from '../../store/useAppStore';
 import useAuthStore from '../../store/useAuthStore';
@@ -8,15 +8,30 @@ import MessageInput from './MessageInput';
 import { useSocket, socket } from '../../hooks/useSocket';
 
 const ChatWindow = () => {
-  const { activeChannel, messages } = useAppStore();
+  const { id } = useParams();
+  const { activeChannel, messages, setActiveChannel, addMessage, findChannelById } = useAppStore();
   const { user } = useAuthStore();
   const outletContext = useOutletContext();
   const toggleRightPanel = outletContext?.toggleRightPanel || (() => {});
   const messagesEndRef = useRef(null);
   const [typingUsers, setTypingUsers] = useState(new Set());
-  
-  // Initialize generic socket hooks (listen to receive_message pipeline)
+
+  // Determine if this is a local channel (no backend needed)
+  const channelId = activeChannel?._id || activeChannel?.id;
+  const isLocalChannel = channelId ? channelId.startsWith('ch_') : false;
+
+  // Always call the hook (hooks rule), but it's a no-op internally when socket fails
   useSocket();
+
+  // Resolve channel from URL param if activeChannel doesn't match
+  useEffect(() => {
+    if (id && (!activeChannel || (activeChannel._id !== id && activeChannel.id !== id))) {
+      const found = findChannelById(id);
+      if (found) {
+        setActiveChannel(found);
+      }
+    }
+  }, [id, activeChannel, findChannelById, setActiveChannel]);
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -26,9 +41,11 @@ const ChatWindow = () => {
     scrollToBottom();
   }, [messages, typingUsers]);
 
+  // Socket listeners — only for backend channels
   useEffect(() => {
-    if (!activeChannel) return;
-    
+    if (!activeChannel || isLocalChannel) return;
+    if (!socket?.connected) return;
+
     socket.emit('join_channel', activeChannel._id);
 
     const handleTyping = ({ senderName }) => {
@@ -39,7 +56,7 @@ const ChatWindow = () => {
         return next;
       });
     };
-    
+
     const handleStopTyping = ({ senderName }) => {
       if (senderName === user?.name) return;
       setTypingUsers(prev => {
@@ -57,15 +74,29 @@ const ChatWindow = () => {
       socket.off('user_stop_typing', handleStopTyping);
       setTypingUsers(new Set());
     };
-  }, [activeChannel, user?.name]);
+  }, [activeChannel, isLocalChannel, user?.name]);
 
-  const handleEmitMessage = (content) => {
-    const senderName = user?.name || 'Anonymous';
-    socket.emit('send_message', { channelId: activeChannel._id, senderName, content });
+  const handleSendMessage = (content) => {
+    const senderName = user?.name || 'You';
+
+    if (isLocalChannel) {
+      // Local mock message — add directly to store
+      const localMsg = {
+        _id: `msg_${Date.now()}`,
+        senderName,
+        content,
+        createdAt: new Date().toISOString(),
+        channelId: channelId,
+      };
+      addMessage(localMsg);
+    } else if (socket?.connected) {
+      // Backend socket message
+      socket.emit('send_message', { channelId: activeChannel._id, senderName, content });
+    }
   };
 
   const handleTypingState = (isTyping) => {
-    if (!activeChannel) return;
+    if (isLocalChannel || !activeChannel || !socket?.connected) return;
     const senderName = user?.name || 'Anonymous';
     socket.emit(isTyping ? 'user_typing' : 'user_stop_typing', { channelId: activeChannel._id, senderName });
   };
@@ -82,52 +113,53 @@ const ChatWindow = () => {
     );
   }
 
+  const channelName = activeChannel?.name || 'channel';
+  const isPrivate = activeChannel?.type === 'private' || activeChannel?.isPrivate;
+
   return (
     <div className="flex-1 bg-[#0d1117] flex flex-col h-full relative overflow-hidden">
       {/* Header */}
       <div className="h-14 flex items-center justify-between px-6 border-b border-gray-800 bg-[#161b22]/90 backdrop-blur-sm absolute top-0 w-full z-10 shrink-0 shadow-sm">
         <div className="flex items-center gap-2 text-white font-medium">
           <Hash size={18} className="text-gray-500" />
-          {activeChannel.name}
+          {channelName}
+          {isPrivate && <span className="text-xs text-gray-500 bg-gray-800 px-1.5 py-0.5 rounded ml-1">Private</span>}
         </div>
-        <button className="text-gray-500 hover:text-gray-300 transition-colors">
+        <button onClick={toggleRightPanel} className="text-gray-500 hover:text-gray-300 transition-colors">
           <Info size={18} />
         </button>
       </div>
 
       {/* Messages */}
       <div className="flex-1 overflow-y-auto pt-[70px] pb-[90px] scroll-smooth flex flex-col min-h-0 relative">
-        
-        {/* Intro */}
+
         {messages.length === 0 ? (
           <div className="flex-1 flex flex-col justify-end px-6 pb-8">
             <div className="w-16 h-16 rounded-2xl bg-indigo-500/10 flex items-center justify-center text-indigo-400 mb-4">
               <Hash size={32} />
             </div>
-            <h1 className="text-3xl font-bold text-white mb-2">Welcome to #{activeChannel.name}!</h1>
-            <p className="text-gray-400">This is the start of the #{activeChannel.name} channel. Start the conversation!</p>
+            <h1 className="text-3xl font-bold text-white mb-2">Welcome to #{channelName}!</h1>
+            <p className="text-gray-400">This is the start of the #{channelName} channel. Start the conversation!</p>
           </div>
         ) : (
           <div className="mt-auto flex flex-col justify-end min-h-min">
             <div className="px-6 pb-8 shrink-0">
-              <h1 className="text-3xl font-bold text-white mb-2">#{activeChannel.name}</h1>
+              <h1 className="text-3xl font-bold text-white mb-2">#{channelName}</h1>
               <p className="text-gray-400">This is the beginning of your chat history.</p>
             </div>
-            
-            {/* List */}
+
             {messages.map((msg, idx) => {
-              const isMe = msg.senderName === user?.name;
+              const isMe = msg.senderName === (user?.name || 'You');
               const prevMsg = idx > 0 ? messages[idx - 1] : null;
-              // Group if same sender AND within 5 minutes
-              const isSequential = prevMsg 
-                && prevMsg.senderName === msg.senderName 
+              const isSequential = prevMsg
+                && prevMsg.senderName === msg.senderName
                 && (new Date(msg.createdAt || Date.now()) - new Date(prevMsg.createdAt || Date.now())) < 5 * 60 * 1000;
 
               return (
-                <MessageItem 
-                  key={msg._id || idx} 
-                  message={msg} 
-                  isMe={isMe} 
+                <MessageItem
+                  key={msg._id || idx}
+                  message={msg}
+                  isMe={isMe}
                   isSequential={isSequential}
                   onOpenThread={() => toggleRightPanel()}
                 />
@@ -151,9 +183,9 @@ const ChatWindow = () => {
         <div ref={messagesEndRef} className="h-4 shrink-0" />
       </div>
 
-      <MessageInput 
-        channelName={activeChannel.name} 
-        onSendMessage={handleEmitMessage} 
+      <MessageInput
+        channelName={channelName}
+        onSendMessage={handleSendMessage}
         onTyping={handleTypingState}
       />
     </div>

@@ -25,7 +25,7 @@ const Sidebar = () => {
   return (
     <>
       <div className="w-16 md:w-20 bg-[#0e1116] border-r border-gray-800 flex flex-col items-center py-4 gap-4 flex-shrink-0 h-full">
-        {workspaces.map((workspace) => (
+        {(Array.isArray(workspaces) ? workspaces : []).map((workspace) => (
           <button
             key={workspace._id}
             onClick={() => setActiveWorkspace(workspace)}

@@ -1,59 +1,57 @@
 import { useState, useEffect } from 'react';
 import useAppStore from '../store/useAppStore';
-import api from '../services/api';
 import toast from 'react-hot-toast';
-import { useOutletContext } from 'react-router-dom';
-import { Users, UserPlus, Merge } from 'lucide-react';
+import { useOutletContext, useNavigate } from 'react-router-dom';
+import { Users, UserPlus, Merge, Star, MoreVertical, Edit2, Trash2, ExternalLink, Hash } from 'lucide-react';
 
 const TeamView = () => {
-  const { activeWorkspace } = useAppStore();
+  const { activeWorkspace, starredTeams, toggleStarredTeam, teams, addTeam, setActiveTeam, activeTeam, removeTeam, getTeamMembers, getTeamChannels } = useAppStore();
   const { simulatedRole } = useOutletContext();
-  const [teams, setTeams] = useState([]);
+  const navigate = useNavigate();
   const [newTeamName, setNewTeamName] = useState('');
-  
+
   // Merge state
   const [mergeSource, setMergeSource] = useState('');
   const [mergeTarget, setMergeTarget] = useState('');
 
-  const fetchTeams = async () => {
-    if (!activeWorkspace) return;
-    try {
-      const res = await api.get(`/teams/${activeWorkspace._id}`);
-      setTeams(res.data);
-    } catch {
-      toast.error('Failed to load teams');
-    }
-  };
-
-  useEffect(() => { fetchTeams(); }, [activeWorkspace]);
-
-  const handleCreateTeam = async (e) => {
+  const handleCreateTeam = (e) => {
     e.preventDefault();
     if (simulatedRole === 'Member') return toast.error('Only Admins/Managers can create teams.');
     if (!newTeamName.trim() || !activeWorkspace) return;
-    try {
-      const res = await api.post('/teams', { workspaceId: activeWorkspace._id, name: newTeamName });
-      setTeams([...teams, res.data]);
-      setNewTeamName('');
-      toast.success('Team created');
-    } catch {
-      toast.error('Creation failed');
+
+    const generatedId = `team_${Date.now()}`;
+    const newTeam = {
+      _id: generatedId,
+      name: newTeamName,
+      members: [],
+      createdAt: new Date().toISOString()
+    };
+
+    addTeam(newTeam);
+    setActiveTeam(newTeam);
+    setNewTeamName('');
+    toast.success('Team created');
+    navigate(`/dashboard/team/${generatedId}`);
+  };
+
+  const handleDeleteTeam = (e, teamId, teamName) => {
+    e.stopPropagation();
+    if (simulatedRole !== 'Admin') return toast.error('Only Admins can delete teams.');
+    removeTeam(teamId);
+    toast.success(`"${teamName}" deleted`);
+    if (activeTeam?._id === teamId) {
+      navigate('/dashboard/teams');
     }
   };
 
   const handleMerge = async () => {
     if (simulatedRole !== 'Admin') return toast.error('Only Admins can merge teams.');
     if (!mergeSource || !mergeTarget || mergeSource === mergeTarget) return toast.error('Select two distinct teams');
-    
-    try {
-      await api.post('/teams/merge', { sourceTeamId: mergeSource, targetTeamId: mergeTarget });
-      toast.success('Teams merged successfully!');
-      setMergeSource('');
-      setMergeTarget('');
-      fetchTeams();
-    } catch {
-      toast.error('Merge failed');
-    }
+    const sourceName = teams.find(t => t._id === mergeSource)?.name;
+    removeTeam(mergeSource);
+    toast.success(`"${sourceName}" merged successfully!`);
+    setMergeSource('');
+    setMergeTarget('');
   };
 
   if (!activeWorkspace) return <div className="p-8 text-white">Select a workspace</div>;
@@ -64,15 +62,16 @@ const TeamView = () => {
         <h2 className="text-xl font-bold text-white tracking-tight flex items-center gap-2">
           <Users size={20} className="text-indigo-400" /> Team Management
         </h2>
+        <span className="ml-3 text-sm text-gray-500">{teams.length} team{teams.length !== 1 ? 's' : ''}</span>
       </div>
 
       <div className="p-8 max-w-4xl w-full mx-auto flex flex-col gap-8 pb-24">
-        
+
         {/* Create Node */}
         <div className="bg-[#161b22] border border-gray-800 rounded-xl p-6 shadow-sm">
-          <h3 className="text-lg font-semibold text-white mb-4 flex items-center gap-2"><UserPlus size={18}/> Create New Team</h3>
+          <h3 className="text-lg font-semibold text-white mb-4 flex items-center gap-2"><UserPlus size={18} /> Create New Team</h3>
           <form onSubmit={handleCreateTeam} className="flex gap-4">
-            <input 
+            <input
               value={newTeamName}
               onChange={e => setNewTeamName(e.target.value)}
               placeholder="e.g. Engineering, Marketing"
@@ -85,7 +84,7 @@ const TeamView = () => {
         {/* Merge Node */}
         {teams.length > 1 && (
           <div className="bg-[#161b22] border border-red-900/30 rounded-xl p-6 shadow-sm">
-            <h3 className="text-lg font-semibold text-white mb-4 flex items-center gap-2"><Merge size={18} className="text-red-400"/> Merge Teams (Danger Zone)</h3>
+            <h3 className="text-lg font-semibold text-white mb-4 flex items-center gap-2"><Merge size={18} className="text-red-400" /> Merge Teams (Danger Zone)</h3>
             <div className="flex items-center gap-4">
               <select value={mergeSource} onChange={e => setMergeSource(e.target.value)} className="flex-1 bg-[#0d1117] border border-gray-700 rounded-lg px-3 py-2 text-white outline-none">
                 <option value="">Select Target A (Will be deleted)</option>
@@ -101,19 +100,89 @@ const TeamView = () => {
           </div>
         )}
 
+        {/* Empty State */}
+        {teams.length === 0 && (
+          <div className="flex flex-col items-center justify-center py-20 text-center">
+            <Users size={56} className="text-gray-700 mb-4" />
+            <h3 className="text-xl font-bold text-white mb-2">No teams yet</h3>
+            <p className="text-gray-400 text-sm mb-6 max-w-md">Create your first team to start organizing members, channels, and projects.</p>
+          </div>
+        )}
+
         {/* Grid View */}
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          {teams.map(team => (
-            <div key={team._id} className="bg-[#161b22] border border-gray-800 rounded-xl p-5 shadow-sm hover:border-gray-700 transition-colors">
-              <div className="flex justify-between items-center mb-3">
-                <h4 className="font-semibold text-white text-lg">{team.name}</h4>
-                <span className="bg-indigo-500/10 text-indigo-400 text-xs px-2 py-1 rounded-full font-medium">{team.members.length} Members</span>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+          {(Array.isArray(teams) ? teams : []).map(team => {
+            const isStarred = (Array.isArray(starredTeams) ? starredTeams : []).includes(team._id);
+            const members = getTeamMembers(team._id);
+            const teamChannels = getTeamChannels(team._id);
+            const onlineCount = members.filter(m => m.status === 'online').length;
+            const mockTags = ['Frontend', 'Q3'];
+
+            return (
+              <div key={team._id} className="group relative bg-[#161b22] border border-gray-800 rounded-xl p-6 shadow-sm hover:border-indigo-500/50 hover:shadow-indigo-500/10 hover:-translate-y-0.5 transition-all w-full cursor-pointer overflow-hidden" onClick={() => { setActiveTeam(team); navigate(`/dashboard/team/${team._id}`); }}>
+
+                {/* Overlay Action Buttons */}
+                <div className="absolute top-4 right-4 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity z-10 bg-[#161b22]/90 backdrop-blur rounded-lg shadow-lg border border-gray-700 p-1">
+                  <button onClick={(e) => { e.stopPropagation(); setActiveTeam(team); navigate(`/dashboard/team/${team._id}`); }} className="p-1.5 text-gray-400 hover:text-white hover:bg-gray-800 rounded-md transition-colors" title="Open"><ExternalLink size={16} /></button>
+                  {simulatedRole !== 'Member' && (
+                    <button onClick={(e) => e.stopPropagation()} className="p-1.5 text-gray-400 hover:text-white hover:bg-gray-800 rounded-md transition-colors" title="Rename"><Edit2 size={16} /></button>
+                  )}
+                  {simulatedRole === 'Admin' && (
+                    <>
+                      <div className="w-px h-4 bg-gray-700 my-auto mx-1"></div>
+                      <button onClick={(e) => handleDeleteTeam(e, team._id, team.name)} className="p-1.5 text-red-500/70 hover:text-red-400 hover:bg-red-500/10 rounded-md transition-colors" title="Delete"><Trash2 size={16} /></button>
+                    </>
+                  )}
+                </div>
+
+                <div className="flex justify-between items-start mb-4">
+                  <div className="flex items-center gap-3">
+                    <button
+                      onClick={(e) => { e.stopPropagation(); toggleStarredTeam(team._id); }}
+                      className={`p-1.5 rounded-md transition-colors -ml-1.5 ${isStarred ? 'text-yellow-400 hover:bg-yellow-400/10' : 'text-gray-600 hover:text-gray-400 hover:bg-gray-800'}`}
+                    >
+                      <Star size={20} fill={isStarred ? "currentColor" : "none"} />
+                    </button>
+                    <div>
+                      <h4 className="font-bold text-white text-lg tracking-tight group-hover:text-indigo-300 transition-colors">{team.name}</h4>
+                      <p className="text-xs text-gray-500 mt-0.5">Core cross-functional squad</p>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Tags */}
+                <div className="flex gap-2 mb-5">
+                  {mockTags.map(tag => (
+                    <span key={tag} className="px-2 py-0.5 rounded text-[10px] uppercase font-bold tracking-wider bg-gray-800/50 text-gray-400 border border-gray-700">{tag}</span>
+                  ))}
+                </div>
+
+                <div className="flex flex-col gap-4">
+                  {/* Avatar Group */}
+                  <div className="flex -space-x-2">
+                    {members.slice(0, 3).map((m, i) => (
+                      <img key={m.id} className="w-8 h-8 rounded-full border-2 border-[#161b22] object-cover ring-1 ring-gray-800" src={m.avatar} alt={m.name} />
+                    ))}
+                    {members.length > 3 && (
+                      <div className="w-8 h-8 rounded-full border-2 border-[#161b22] bg-gray-800 text-gray-400 text-xs font-bold flex items-center justify-center ring-1 ring-gray-700">+{members.length - 3}</div>
+                    )}
+                    {members.length === 0 && (
+                      <div className="w-8 h-8 rounded-full border-2 border-[#161b22] bg-gray-800 text-gray-500 text-xs flex items-center justify-center ring-1 ring-gray-700">
+                        <Users size={14} />
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Analytics Stats Row */}
+                  <div className="flex items-center gap-4 text-xs font-medium text-gray-400 pt-3 border-t border-gray-800/50">
+                    <span className="flex items-center gap-1"><Users size={14} className="text-gray-500" /> {members.length} Members</span>
+                    <span className="flex items-center gap-1"><span className="w-2 h-2 bg-emerald-500 rounded-full"></span> {onlineCount} Online</span>
+                    <span className="flex items-center gap-1"><Hash size={14} className="text-gray-500" /> {teamChannels.length} Channels</span>
+                  </div>
+                </div>
               </div>
-              <div className="text-sm text-gray-500">
-                {team.members.length === 0 ? 'No members added yet. Invite via dashboard (Coming Soon).' : 'Members listed here.'}
-              </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
 
       </div>
