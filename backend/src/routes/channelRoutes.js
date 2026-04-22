@@ -1,9 +1,13 @@
 import express from 'express';
-import { createChannel, getChannelsByWorkspace } from '../controllers/channelController.js';
+import { createChannel, getChannelsByTeam, getChannelsByWorkspace, deleteChannel } from '../controllers/channelController.js';
+import { protect } from '../middleware/auth.js';
 
 const router = express.Router();
 
-router.route('/').post(createChannel);
-router.route('/:workspaceId').get(getChannelsByWorkspace);
+router.post('/', protect, createChannel);
+router.get('/team/:teamId', protect, getChannelsByTeam);
+router.delete('/:id', protect, deleteChannel);
+// Backward compat
+router.get('/:workspaceId', protect, getChannelsByWorkspace);
 
 export default router;
