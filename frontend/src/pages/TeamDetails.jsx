@@ -1,8 +1,9 @@
 import { useState, useEffect, useMemo } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { Users, Hash, Settings, Lock, UserMinus, Mail, Shield, ShieldCheck, Crown } from 'lucide-react';
+import { Users, Hash, Settings, Lock, UserMinus, Mail, Shield, ShieldCheck, Crown, Plus } from 'lucide-react';
 import useAppStore from '../store/useAppStore';
 import Modal from '../components/common/Modal';
+import CreateChannelForm from '../components/channel/CreateChannelForm';
 import toast from 'react-hot-toast';
 
 const DESIGNATIONS = [
@@ -37,9 +38,9 @@ const TeamDetails = () => {
   const { id } = useParams();
   const navigate = useNavigate();
   const {
-    activeTeam, teams, setActiveTeam, setActiveChannel, activeWorkspace,
+    activeTeam, teams, setActiveTeam, setActiveChannel,
     getTeamMembers, removeTeamMember, updateTeamMember,
-    getTeamChannels, createTeamChannel, fetchTeamChannels,
+    getTeamChannels, fetchTeamChannels,
     getTeamActivity, fetchTeamActivity,
     sendInvite,
   } = useAppStore();
@@ -50,8 +51,7 @@ const TeamDetails = () => {
   const [inviteRole, setInviteRole] = useState('member');
   const [inviteDesignation, setInviteDesignation] = useState('');
   const [inviting, setInviting] = useState(false);
-  const [newChannelName, setNewChannelName] = useState('');
-  const [newChannelType, setNewChannelType] = useState('public');
+  const [showCreateChannel, setShowCreateChannel] = useState(false);
 
   const resolvedTeam = (activeTeam?._id === id) ? activeTeam : teams.find(t => t._id === id) || activeTeam;
 
@@ -127,18 +127,6 @@ const TeamDetails = () => {
     } catch { toast.error('Failed to remove member'); }
   };
 
-  const handleCreateChannel = async (e) => {
-    e.preventDefault();
-    if (!newChannelName.trim() || !activeWorkspace) return;
-    try {
-      const channel = await createTeamChannel(teamId, activeWorkspace._id, newChannelName.toLowerCase().replace(/\s+/g, '-'), newChannelType);
-      setActiveChannel(channel);
-      setNewChannelName('');
-      toast.success(`#${channel.name} created`);
-      navigate(`/dashboard/channel/${channel._id}`);
-    } catch { toast.error('Failed to create channel'); }
-  };
-
   const inputCls = 'bg-white dark:bg-[#0d1117] border border-slate-200 dark:border-gray-700 rounded-lg px-4 py-2 text-slate-900 dark:text-white focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none transition-colors placeholder-slate-400 dark:placeholder-gray-600';
   const smSelectCls = 'bg-white dark:bg-[#0d1117] border border-slate-200 dark:border-gray-700 rounded-md text-[11px] text-slate-700 dark:text-gray-300 px-1.5 py-1 outline-none cursor-pointer';
 
@@ -208,20 +196,21 @@ const TeamDetails = () => {
       case 'Channels':
         return (
           <div className="flex flex-col gap-4 mt-4">
-            <form onSubmit={handleCreateChannel} className="flex gap-3">
-              <input value={newChannelName} onChange={e => setNewChannelName(e.target.value)} placeholder="New channel name..."
-                className={`flex-1 ${inputCls} text-sm`} />
-              <select value={newChannelType} onChange={e => setNewChannelType(e.target.value)} className={`${inputCls} text-sm`}>
-                <option value="public">Public</option>
-                <option value="private">Private</option>
-              </select>
-              <button type="submit" disabled={!newChannelName.trim()} className="bg-indigo-600 hover:bg-indigo-500 text-white px-4 py-2 rounded-lg text-sm font-medium disabled:opacity-50 shadow-sm transition-colors active:scale-95">Create</button>
-            </form>
+            <div className="flex items-center justify-between">
+              <p className="text-sm text-slate-500 dark:text-gray-400">{teamChannels.length} channel{teamChannels.length === 1 ? '' : 's'}</p>
+              <button
+                onClick={() => setShowCreateChannel(true)}
+                className="inline-flex items-center gap-1.5 bg-indigo-600 hover:bg-indigo-500 text-white px-3 py-1.5 rounded-lg text-sm font-medium shadow-sm transition-colors active:scale-95"
+              >
+                <Plus size={14} /> New channel
+              </button>
+            </div>
             {teamChannels.length === 0 ? (
               <div className="flex flex-col items-center justify-center py-16 text-center animate-fade-in">
                 <Hash size={40} className="text-slate-300 dark:text-gray-700 mb-3" />
                 <p className="text-slate-700 dark:text-gray-400 font-medium mb-1">No channels yet</p>
-                <p className="text-slate-500 dark:text-gray-600 text-sm">Create a channel to start discussions</p>
+                <p className="text-slate-500 dark:text-gray-600 text-sm mb-4">Create a channel to start discussions</p>
+                <button onClick={() => setShowCreateChannel(true)} className="bg-indigo-600 hover:bg-indigo-500 text-white px-4 py-2 rounded-lg text-sm font-medium shadow-sm transition-colors active:scale-95">Create channel</button>
               </div>
             ) : (
               <div className="flex flex-col gap-1">
@@ -323,6 +312,21 @@ const TeamDetails = () => {
           ))}
         </div>
       </div>
+
+      {/* Create Channel Modal */}
+      <Modal isOpen={showCreateChannel} onClose={() => setShowCreateChannel(false)} title="Create Channel">
+        <CreateChannelForm
+          teams={teams}
+          defaultTeamId={teamId}
+          lockTeam
+          onCancel={() => setShowCreateChannel(false)}
+          onCreated={(channel) => {
+            setShowCreateChannel(false);
+            setActiveChannel(channel);
+            navigate(`/dashboard/channel/${channel._id}`);
+          }}
+        />
+      </Modal>
 
       {/* Invite Modal */}
       <Modal isOpen={showInviteModal} onClose={() => setShowInviteModal(false)} title="Invite to Team">

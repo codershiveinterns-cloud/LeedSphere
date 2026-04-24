@@ -6,6 +6,7 @@ import useAppStore from '../../store/useAppStore';
 import useThemeStore from '../../store/useThemeStore';
 import useSearchStore from '../../store/useSearchStore';
 import Modal from './Modal';
+import CreateChannelForm from '../channel/CreateChannelForm';
 import toast from 'react-hot-toast';
 
 const Header = ({ simulatedRole, setSimulatedRole }) => {
@@ -13,7 +14,7 @@ const Header = ({ simulatedRole, setSimulatedRole }) => {
   const {
     activeWorkspace, uiStates, setUiState,
     notifications, markNotificationRead, markAllNotificationsRead, getUnreadCount,
-    teams, createTeam, setActiveTeam, createTeamChannel,
+    teams, createTeam, setActiveTeam,
   } = useAppStore();
   const { theme, toggleTheme } = useThemeStore();
   const openSearch = useSearchStore((s) => s.open);
@@ -23,8 +24,6 @@ const Header = ({ simulatedRole, setSimulatedRole }) => {
   const [showCreateTeamModal, setShowCreateTeamModal] = useState(false);
   const [showCreateChannelModal, setShowCreateChannelModal] = useState(false);
   const [newTeamName, setNewTeamName] = useState('');
-  const [newChannelName, setNewChannelName] = useState('');
-  const [newChannelTeamId, setNewChannelTeamId] = useState('');
 
   const plusRef = useRef(null);
   const notifRef = useRef(null);
@@ -56,21 +55,6 @@ const Header = ({ simulatedRole, setSimulatedRole }) => {
       navigate(`/dashboard/team/${team._id}`);
     } catch {
       toast.error('Failed to create team');
-    }
-  };
-
-  const handleCreateChannel = async (e) => {
-    e.preventDefault();
-    if (!newChannelName.trim() || !newChannelTeamId || !activeWorkspace) return;
-    try {
-      const channel = await createTeamChannel(newChannelTeamId, activeWorkspace._id, newChannelName.toLowerCase().replace(/\s+/g, '-'));
-      setNewChannelName('');
-      setNewChannelTeamId('');
-      setShowCreateChannelModal(false);
-      setUiState('isGlobalPlusOpen', false);
-      toast.success(`#${channel.name} created`);
-    } catch {
-      toast.error('Failed to create channel');
     }
   };
 
@@ -229,24 +213,15 @@ const Header = ({ simulatedRole, setSimulatedRole }) => {
       </Modal>
 
       <Modal isOpen={showCreateChannelModal} onClose={() => setShowCreateChannelModal(false)} title="Create Channel">
-        <form onSubmit={handleCreateChannel} className="flex flex-col gap-4">
-          <div>
-            <label className="block text-sm font-medium text-slate-700 dark:text-gray-300 mb-1">Select Team</label>
-            <select value={newChannelTeamId} onChange={e => setNewChannelTeamId(e.target.value)} className="w-full bg-white dark:bg-[#0d1117] border border-slate-200 dark:border-gray-700 rounded-lg px-4 py-2 text-slate-900 dark:text-white outline-none transition-colors">
-              <option value="">Choose a team...</option>
-              {teams.map(t => <option key={t._id} value={t._id}>{t.name}</option>)}
-            </select>
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-slate-700 dark:text-gray-300 mb-1">Channel Name</label>
-            <input type="text" value={newChannelName} onChange={e => setNewChannelName(e.target.value)}
-              className="w-full bg-white dark:bg-[#0d1117] border border-slate-200 dark:border-gray-700 rounded-lg px-4 py-2 text-slate-900 dark:text-white focus:ring-1 focus:ring-indigo-500 focus:border-indigo-500 outline-none placeholder-slate-400 dark:placeholder-gray-600 transition-colors" placeholder="e.g. general" />
-          </div>
-          <div className="flex justify-end gap-3 mt-2">
-            <button type="button" onClick={() => setShowCreateChannelModal(false)} className="px-4 py-2 text-sm text-slate-500 dark:text-gray-400 hover:text-slate-900 dark:hover:text-white transition-colors active:scale-95">Cancel</button>
-            <button type="submit" disabled={!newChannelName.trim() || !newChannelTeamId} className="px-5 py-2 text-sm bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg disabled:opacity-50 transition-colors active:scale-95 shadow-sm">Create</button>
-          </div>
-        </form>
+        <CreateChannelForm
+          teams={teams}
+          onCancel={() => setShowCreateChannelModal(false)}
+          onCreated={(channel) => {
+            setShowCreateChannelModal(false);
+            setUiState('isGlobalPlusOpen', false);
+            navigate(`/dashboard/channel/${channel._id}`);
+          }}
+        />
       </Modal>
     </>
   );

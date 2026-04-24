@@ -275,7 +275,7 @@ const useAppStore = create((set, get) => ({
     return get().teamChannels[teamId] || [];
   },
 
-  createTeamChannel: async (teamId, workspaceId, name, type = 'public') => {
+  createTeamChannel: async (teamId, workspaceId, name, type = 'public', members = []) => {
     try {
       const res = await api.post('/channels', {
         teamId,
@@ -283,6 +283,7 @@ const useAppStore = create((set, get) => ({
         name,
         type,
         isPrivate: type === 'private',
+        members: type === 'private' ? members : [],
       });
       set((state) => {
         const existing = state.teamChannels[teamId] || [];
@@ -291,6 +292,62 @@ const useAppStore = create((set, get) => ({
       return res.data;
     } catch (err) {
       console.error('createTeamChannel:', err.message);
+      throw err;
+    }
+  },
+
+  fetchChannelMembers: async (channelId) => {
+    try {
+      const res = await api.get(`/channels/${channelId}/members`);
+      return res.data;
+    } catch (err) {
+      console.error('fetchChannelMembers:', err.message);
+      throw err;
+    }
+  },
+
+  joinChannel: async (channelId) => {
+    try {
+      await api.post('/channels/join', { channelId });
+      return true;
+    } catch (err) {
+      console.error('joinChannel:', err.message);
+      throw err;
+    }
+  },
+
+  leaveChannel: async (channelId, teamId) => {
+    try {
+      await api.post('/channels/leave', { channelId });
+      if (teamId) {
+        set((state) => ({
+          teamChannels: {
+            ...state.teamChannels,
+            [teamId]: (state.teamChannels[teamId] || []).filter((c) => c._id !== channelId),
+          },
+        }));
+      }
+      return true;
+    } catch (err) {
+      console.error('leaveChannel:', err.message);
+      throw err;
+    }
+  },
+
+  deleteChannel: async (channelId, teamId) => {
+    try {
+      await api.delete(`/channels/${channelId}`);
+      if (teamId) {
+        set((state) => ({
+          teamChannels: {
+            ...state.teamChannels,
+            [teamId]: (state.teamChannels[teamId] || []).filter((c) => c._id !== channelId),
+          },
+        }));
+      }
+      return true;
+    } catch (err) {
+      console.error('deleteChannel:', err.message);
       throw err;
     }
   },

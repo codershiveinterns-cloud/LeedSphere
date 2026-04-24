@@ -1,10 +1,12 @@
 import { useEffect, useRef, useState } from 'react';
 import { useOutletContext, useParams } from 'react-router-dom';
-import { Hash, Info } from 'lucide-react';
+import { Hash, Info, Lock, Users } from 'lucide-react';
 import useAppStore from '../../store/useAppStore';
 import useAuthStore from '../../store/useAuthStore';
 import MessageItem from './MessageItem';
 import MessageInput from './MessageInput';
+import ChannelInfoModal from '../channel/ChannelInfoModal';
+import CallBar from '../Call/CallBar';
 import { useSocket, socket } from '../../hooks/useSocket';
 
 const ChatWindow = () => {
@@ -15,6 +17,7 @@ const ChatWindow = () => {
   const toggleRightPanel = outletContext?.toggleRightPanel || (() => {});
   const messagesEndRef = useRef(null);
   const [typingUsers, setTypingUsers] = useState(new Set());
+  const [showChannelInfo, setShowChannelInfo] = useState(false);
 
   useSocket();
 
@@ -94,14 +97,34 @@ const ChatWindow = () => {
   return (
     <div className="flex-1 bg-[#f5f6f8] dark:bg-[#0d1117] flex flex-col h-full relative overflow-hidden transition-colors duration-200">
       <div className="h-14 flex items-center justify-between px-6 border-b border-slate-200 dark:border-gray-800 bg-white/90 dark:bg-[#161b22]/90 backdrop-blur-sm absolute top-0 w-full z-10 shrink-0 shadow-sm transition-colors duration-200">
-        <div className="flex items-center gap-2 text-slate-900 dark:text-white font-medium">
-          <Hash size={18} className="text-slate-400 dark:text-gray-500" />
+        <button
+          onClick={() => setShowChannelInfo(true)}
+          className="flex items-center gap-2 text-slate-900 dark:text-white font-medium hover:text-indigo-600 dark:hover:text-indigo-300 transition-colors"
+          title="Channel details"
+        >
+          {isPrivate
+            ? <Lock size={16} className="text-amber-600 dark:text-amber-400" />
+            : <Hash size={18} className="text-slate-400 dark:text-gray-500" />}
           {channelName}
           {isPrivate && <span className="text-xs text-slate-500 dark:text-gray-500 bg-slate-100 dark:bg-gray-800 px-1.5 py-0.5 rounded ml-1">Private</span>}
-        </div>
-        <button onClick={() => toggleRightPanel()} className="text-slate-400 dark:text-gray-500 hover:text-slate-700 dark:hover:text-gray-300 transition-colors active:scale-90">
-          <Info size={18} />
         </button>
+        <div className="flex items-center gap-1">
+          <CallBar channelId={activeChannel?._id} />
+          <button
+            onClick={() => setShowChannelInfo(true)}
+            className="p-1.5 rounded-md text-slate-400 dark:text-gray-500 hover:text-slate-700 dark:hover:text-gray-300 hover:bg-slate-100 dark:hover:bg-gray-800 transition-colors active:scale-90"
+            title="Members & settings"
+          >
+            <Users size={16} />
+          </button>
+          <button
+            onClick={() => toggleRightPanel()}
+            className="p-1.5 rounded-md text-slate-400 dark:text-gray-500 hover:text-slate-700 dark:hover:text-gray-300 hover:bg-slate-100 dark:hover:bg-gray-800 transition-colors active:scale-90"
+            title="Thread panel"
+          >
+            <Info size={16} />
+          </button>
+        </div>
       </div>
 
       <div className="flex-1 overflow-y-auto pt-[70px] pb-[90px] scroll-smooth flex flex-col min-h-0 relative">
@@ -142,6 +165,12 @@ const ChatWindow = () => {
       </div>
 
       <MessageInput channelName={channelName} onSendMessage={handleSendMessage} onTyping={handleTypingState} />
+
+      <ChannelInfoModal
+        open={showChannelInfo}
+        onClose={() => setShowChannelInfo(false)}
+        channelId={activeChannel?._id}
+      />
     </div>
   );
 };

@@ -3,6 +3,7 @@ import Message from '../models/Message.js';
 import DirectMessage from '../models/DirectMessage.js';
 import Conversation from '../models/Conversation.js';
 import User from '../models/User.js';
+import { registerCallHandlers } from './callHandler.js';
 
 export const handleSockets = (io) => {
   io.use(async (socket, next) => {
@@ -23,6 +24,9 @@ export const handleSockets = (io) => {
 
     // Auto-join user's personal room for DM notifications
     if (userId) socket.join(`user_${userId}`);
+
+    // ===== WebRTC call signaling =====
+    registerCallHandlers(io, socket);
 
     // ===== Channel Rooms =====
     socket.on('join_channel', (channelId) => {

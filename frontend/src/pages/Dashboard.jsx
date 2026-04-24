@@ -8,6 +8,7 @@ import InnerSidebar from '../components/InnerSidebar';
 import Header from '../components/common/Header';
 import RightPanel from '../components/RightPanel';
 import SearchModal from '../components/common/SearchModal';
+import CallRoom from '../components/Call/CallRoom';
 import { Toaster } from 'react-hot-toast';
 import toast from 'react-hot-toast';
 import { Mail, Check, X } from 'lucide-react';
@@ -128,6 +129,7 @@ const Dashboard = () => {
       </main>
 
       <SearchModal />
+      <CallRoom />
       <Toaster position="top-right" />
     </div>
   );
