@@ -21,6 +21,9 @@ import conversationRoutes from './src/routes/conversationRoutes.js';
 import noteRoutes from './src/routes/noteRoutes.js';
 import activityRoutes from './src/routes/activityRoutes.js';
 import notificationRoutes from './src/routes/notificationRoutes.js';
+import inviteRoutes from './src/routes/inviteRoutes.js';
+import analyticsRoutes from './src/routes/analyticsRoutes.js';
+import searchRoutes from './src/routes/searchRoutes.js';
 
 import { handleSockets } from './src/sockets/socketHandler.js';
 
@@ -59,6 +62,9 @@ app.use('/api/conversations', conversationRoutes);
 app.use('/api/notes', noteRoutes);
 app.use('/api/activity', activityRoutes);
 app.use('/api/notifications', notificationRoutes);
+app.use('/api/invites', inviteRoutes);
+app.use('/api/analytics', analyticsRoutes);
+app.use('/api/search', searchRoutes);
 
 // Backward compat: old routes without /api prefix
 app.use('/workspaces', workspaceRoutes);

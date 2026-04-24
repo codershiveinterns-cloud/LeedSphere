@@ -1,69 +1,59 @@
 import { create } from 'zustand';
 import api from '../services/api';
 
-// Mock data generators
-const mockMembers = [
-  { id: 'u1', name: 'Sarah Chen', avatar: 'https://i.pravatar.cc/150?u=sarah', role: 'admin', status: 'online', title: 'Engineering Lead' },
-  { id: 'u2', name: 'John Miller', avatar: 'https://i.pravatar.cc/150?u=john', role: 'member', status: 'online', title: 'Fullstack Engineer' },
-  { id: 'u3', name: 'Alice Park', avatar: 'https://i.pravatar.cc/150?u=alice', role: 'member', status: 'idle', title: 'Frontend Developer' },
-  { id: 'u4', name: 'Bob Wilson', avatar: 'https://i.pravatar.cc/150?u=bob', role: 'member', status: 'offline', title: 'Backend Engineer' },
-  { id: 'u5', name: 'Diana Ross', avatar: 'https://i.pravatar.cc/150?u=diana', role: 'admin', status: 'online', title: 'Product Manager' },
-];
-
-const mockFiles = [
-  { id: 'f1', name: 'Architecture_Diagram.png', type: 'image', size: '2.4 MB', uploadedBy: 'Alice Park', uploadedAt: '2 days ago' },
-  { id: 'f2', name: 'Q3_Planning.pdf', type: 'document', size: '1.1 MB', uploadedBy: 'Sarah Chen', uploadedAt: '3 days ago' },
-  { id: 'f3', name: 'API_Spec_v2.md', type: 'document', size: '340 KB', uploadedBy: 'Bob Wilson', uploadedAt: '5 days ago' },
-  { id: 'f4', name: 'Dashboard_Mockup.png', type: 'image', size: '3.8 MB', uploadedBy: 'Diana Ross', uploadedAt: '1 week ago' },
-  { id: 'f5', name: 'Sprint_Retro_Notes.pdf', type: 'document', size: '520 KB', uploadedBy: 'John Miller', uploadedAt: '1 week ago' },
-  { id: 'f6', name: 'Logo_Final.svg', type: 'image', size: '180 KB', uploadedBy: 'Alice Park', uploadedAt: '2 weeks ago' },
-];
-
 const useAppStore = create((set, get) => ({
+  // ===== Workspaces =====
   workspaces: [],
   activeWorkspace: null,
-  channels: [],
+
+  // ===== Teams =====
+  teams: [],
+  activeTeam: null,
+
+  // ===== Channels (per-team) =====
   activeChannel: null,
   messages: [],
+  teamChannels: {}, // { [teamId]: [...channels] }
 
-  // UI & SaaS Extensions
-  starredTeams: [],
-  recentItems: [],
+  // ===== Members (per-team from API populated data) =====
+  // Not stored separately — comes from team.members populated
+
+  // ===== Activity =====
+  teamActivity: {},
+
+  // ===== Notifications =====
+  notifications: [],
+
+  // ===== UI State =====
+  starredTeams: JSON.parse(localStorage.getItem('starredTeams') || '[]'),
+  recentItems: JSON.parse(localStorage.getItem('recentItems') || '[]'),
   uiStates: {
     isGlobalPlusOpen: false,
     isNotificationsOpen: false,
   },
 
-  // Frontend-only Teams Mock State
-  teams: [],
-  activeTeam: null,
+  _fetchingWorkspaces: false,
 
-  // Per-team data maps: { [teamId]: [...] }
-  teamMembers: {},
-  teamChannels: {},
-  teamActivity: {},
-  teamFiles: {},
-  teamPinnedNotes: {},
-
-  // Notifications
-  notifications: [
-    { id: 'n1', text: 'Sarah Chen updated the Engineering team', type: 'team', read: false, timestamp: Date.now() - 7200000, icon: 'team' },
-    { id: 'n2', text: '@John mentioned you in #general', type: 'mention', read: false, timestamp: Date.now() - 14400000, icon: 'mention' },
-    { id: 'n3', text: 'New task assigned: Review PR #42', type: 'task', read: false, timestamp: Date.now() - 28800000, icon: 'task' },
-    { id: 'n4', text: 'Alice shared Architecture_Diagram.png', type: 'team', read: true, timestamp: Date.now() - 86400000, icon: 'team' },
-    { id: 'n5', text: 'Sprint planning meeting in 30 min', type: 'task', read: true, timestamp: Date.now() - 172800000, icon: 'task' },
-  ],
-
-  // Workspaces
+  // =====================
+  // WORKSPACE ACTIONS
+  // =====================
   fetchWorkspaces: async () => {
+    // Prevent duplicate concurrent fetches
+    if (get()._fetchingWorkspaces) return;
+    set({ _fetchingWorkspaces: true });
     try {
       const res = await api.get('/workspaces');
-      set({ workspaces: res.data });
-      if (res.data.length > 0 && !get().activeWorkspace) {
-        get().setActiveWorkspace(res.data[0]);
+      const workspaces = res.data || [];
+      set({ workspaces });
+      // Auto-select first workspace ONLY if none is active
+      if (workspaces.length > 0 && !get().activeWorkspace) {
+        get().setActiveWorkspace(workspaces[0]);
       }
     } catch (err) {
-      console.error(err);
+      console.error('fetchWorkspaces:', err.message);
+      set({ workspaces: [] });
+    } finally {
+      set({ _fetchingWorkspaces: false });
     }
   },
 
@@ -72,103 +62,511 @@ const useAppStore = create((set, get) => ({
       const res = await api.post('/workspaces', { name });
       set((state) => ({ workspaces: [...state.workspaces, res.data] }));
       get().setActiveWorkspace(res.data);
+      return res.data;
     } catch (err) {
-      console.error(err);
+      console.error('createWorkspace:', err.message);
+      throw err;
     }
   },
 
   setActiveWorkspace: (workspace) => {
     if (!workspace) {
-      set({ activeWorkspace: null, activeChannel: null, messages: [] });
+      set({ activeWorkspace: null, activeChannel: null, messages: [], teams: [], teamChannels: {} });
       return;
     }
-    set({ activeWorkspace: workspace, activeChannel: null, messages: [] });
-    if (workspace._id) {
-      get().fetchChannels(workspace._id);
-    }
+    // Don't re-fetch if same workspace is already active
+    if (get().activeWorkspace?._id === workspace._id) return;
+    set({ activeWorkspace: workspace, activeChannel: null, messages: [], teams: [], teamChannels: {} });
+    get().fetchTeams(workspace._id);
   },
 
-  // Channels
-  fetchChannels: async (workspaceId) => {
+  // =====================
+  // TEAM ACTIONS (API-driven)
+  // =====================
+  fetchTeams: async (workspaceId) => {
     try {
-      const res = await api.get(`/channels/${workspaceId}`);
-      set({ channels: res.data });
-      if (res.data.length > 0) {
-        get().setActiveChannel(res.data[0]);
+      const res = await api.get(`/teams/${workspaceId}`);
+      set({ teams: res.data || [] });
+      // Also fetch channels for each team
+      for (const team of (res.data || [])) {
+        get().fetchTeamChannels(team._id);
       }
     } catch (err) {
-      console.error(err);
+      console.error('fetchTeams:', err.message);
+      set({ teams: [] });
     }
   },
 
-  createChannel: async (workspaceId, name, isPrivate = false) => {
+  createTeam: async (workspaceId, name) => {
     try {
-      const res = await api.post('/channels', { workspaceId, name, isPrivate });
-      set((state) => ({ channels: [...state.channels, res.data] }));
-      get().setActiveChannel(res.data);
+      const res = await api.post('/teams', { workspaceId, name });
+      set((state) => ({ teams: [...state.teams, res.data] }));
+      return res.data;
     } catch (err) {
-      console.error(err);
+      console.error('createTeam:', err.message);
+      throw err;
     }
+  },
+
+  deleteTeam: async (teamId) => {
+    try {
+      await api.delete(`/teams/${teamId}`);
+      set((state) => ({
+        teams: state.teams.filter(t => t._id !== teamId),
+        activeTeam: state.activeTeam?._id === teamId ? null : state.activeTeam,
+        starredTeams: state.starredTeams.filter(id => id !== teamId),
+      }));
+    } catch (err) {
+      console.error('deleteTeam:', err.message);
+      throw err;
+    }
+  },
+
+  mergeTeams: async (targetTeamId, sourceTeamId) => {
+    try {
+      const res = await api.post('/teams/merge', { targetTeamId, sourceTeamId });
+      // Refetch teams
+      const ws = get().activeWorkspace;
+      if (ws) get().fetchTeams(ws._id);
+      return res.data;
+    } catch (err) {
+      console.error('mergeTeams:', err.message);
+      throw err;
+    }
+  },
+
+  setActiveTeam: (team) => {
+    set({ activeTeam: team || null });
+    if (team?._id) {
+      get().addRecentItem({ id: team._id, type: 'team', name: team.name });
+      get().fetchTeamChannels(team._id);
+      get().fetchTeamActivity(team._id);
+    }
+  },
+
+  getTeamById: async (teamId) => {
+    try {
+      const res = await api.get(`/teams/detail/${teamId}`);
+      return res.data;
+    } catch (err) {
+      console.error('getTeamById:', err.message);
+      return null;
+    }
+  },
+
+  // ===== Team Members (from populated team data) =====
+  getTeamMembers: (teamId) => {
+    const team = get().teams.find(t => t._id === teamId);
+    if (!team?.members) return [];
+    return team.members.map(m => ({
+      id: m.userId?._id || m.userId,
+      name: m.userId?.name || 'Unknown',
+      email: m.userId?.email || '',
+      avatar: m.userId?.avatar || `https://i.pravatar.cc/150?u=${m.userId?._id || m.userId}`,
+      role: m.role,
+      designation: m.designation || '',
+      status: 'online',
+    }));
+  },
+
+  addTeamMember: async (teamId, userId, role = 'member', designation = '') => {
+    try {
+      const res = await api.post(`/teams/${teamId}/members`, { userId, role, designation });
+      set((state) => ({
+        teams: state.teams.map(t => t._id === teamId ? res.data : t),
+      }));
+      return res.data;
+    } catch (err) {
+      console.error('addTeamMember:', err.message);
+      throw err;
+    }
+  },
+
+  updateTeamMember: async (teamId, userId, data) => {
+    try {
+      const res = await api.put(`/teams/${teamId}/members/${userId}`, data);
+      set((state) => ({
+        teams: state.teams.map(t => t._id === teamId ? res.data : t),
+      }));
+      return res.data;
+    } catch (err) {
+      console.error('updateTeamMember:', err.message);
+      throw err;
+    }
+  },
+
+  removeTeamMember: async (teamId, userId) => {
+    try {
+      const res = await api.delete(`/teams/${teamId}/members/${userId}`);
+      set((state) => ({
+        teams: state.teams.map(t => t._id === teamId ? res.data : t),
+      }));
+    } catch (err) {
+      console.error('removeTeamMember:', err.message);
+      throw err;
+    }
+  },
+
+  // ===== Invites =====
+  pendingInvites: [],
+
+  fetchPendingInvites: async () => {
+    try {
+      const res = await api.get('/invites/pending');
+      set({ pendingInvites: res.data || [] });
+    } catch (err) {
+      console.error('fetchPendingInvites:', err.message);
+    }
+  },
+
+  sendInvite: async (teamId, email, role, designation) => {
+    try {
+      const res = await api.post('/invites', { teamId, email, role, designation });
+      return res.data;
+    } catch (err) {
+      console.error('sendInvite:', err.message);
+      throw err;
+    }
+  },
+
+  acceptInvite: async (inviteId) => {
+    try {
+      const res = await api.post(`/invites/${inviteId}/accept`);
+      set((state) => ({
+        pendingInvites: state.pendingInvites.filter(i => i._id !== inviteId),
+      }));
+      // Refetch teams to show the newly joined team
+      const ws = get().activeWorkspace;
+      if (ws) get().fetchTeams(ws._id);
+      return res.data;
+    } catch (err) {
+      console.error('acceptInvite:', err.message);
+      throw err;
+    }
+  },
+
+  declineInvite: async (inviteId) => {
+    try {
+      await api.post(`/invites/${inviteId}/decline`);
+      set((state) => ({
+        pendingInvites: state.pendingInvites.filter(i => i._id !== inviteId),
+      }));
+    } catch (err) {
+      console.error('declineInvite:', err.message);
+      throw err;
+    }
+  },
+
+  // =====================
+  // CHANNEL ACTIONS (API-driven)
+  // =====================
+  fetchTeamChannels: async (teamId) => {
+    try {
+      const res = await api.get(`/channels/team/${teamId}`);
+      set((state) => ({
+        teamChannels: { ...state.teamChannels, [teamId]: res.data || [] },
+      }));
+    } catch (err) {
+      console.error('fetchTeamChannels:', err.message);
+    }
+  },
+
+  getTeamChannels: (teamId) => {
+    return get().teamChannels[teamId] || [];
+  },
+
+  createTeamChannel: async (teamId, workspaceId, name, type = 'public') => {
+    try {
+      const res = await api.post('/channels', {
+        teamId,
+        workspaceId,
+        name,
+        type,
+        isPrivate: type === 'private',
+      });
+      set((state) => {
+        const existing = state.teamChannels[teamId] || [];
+        return { teamChannels: { ...state.teamChannels, [teamId]: [...existing, res.data] } };
+      });
+      return res.data;
+    } catch (err) {
+      console.error('createTeamChannel:', err.message);
+      throw err;
+    }
+  },
+
+  getAllTeamChannels: () => {
+    const state = get();
+    return Object.entries(state.teamChannels || {}).flatMap(([teamId, chs]) =>
+      (chs || []).map(ch => ({ ...ch, teamId }))
+    );
+  },
+
+  findChannelById: (channelId) => {
+    const state = get();
+    for (const [teamId, chs] of Object.entries(state.teamChannels || {})) {
+      const found = (chs || []).find(ch => ch._id === channelId);
+      if (found) return { ...found, teamId };
+    }
+    return null;
   },
 
   setActiveChannel: (channel) => {
     set({ activeChannel: channel || null, messages: [] });
-    // Only fetch from API for backend channels (have _id, not id)
-    const channelId = channel?._id;
-    if (channelId && !channelId.startsWith('ch_')) {
-      get().fetchMessages(channelId);
-    }
-    // Track in recent items
-    if (channel) {
-      const chId = channel._id || channel.id;
-      const chName = channel.name;
-      if (chId && chName) {
-        get().addRecentItem({ id: chId, type: 'channel', name: `#${chName}` });
-      }
+    if (channel?._id) {
+      get().fetchMessages(channel._id);
+      get().addRecentItem({ id: channel._id, type: 'channel', name: `#${channel.name}` });
     }
   },
 
-  // Messages
+  // =====================
+  // MESSAGE ACTIONS
+  // =====================
   fetchMessages: async (channelId) => {
     try {
       const res = await api.get(`/messages/${channelId}`);
-      set({ messages: res.data });
+      set({ messages: res.data || [] });
     } catch (err) {
-      console.error(err);
+      console.error('fetchMessages:', err.message);
+      set({ messages: [] });
     }
   },
 
   addMessage: (message) => {
     set((state) => {
-      const activeId = state.activeChannel?._id || state.activeChannel?.id;
-      const msgTarget = message.conversationId || message.channelId;
-      if (activeId && msgTarget === activeId) {
-        return { messages: [...state.messages, message] };
-      }
-      // For local messages with no conversationId, just add
-      if (!msgTarget && state.activeChannel) {
+      const activeId = state.activeChannel?._id;
+      const msgTarget = message.channelId || message.conversationId;
+      if (activeId && (msgTarget === activeId || msgTarget?.toString() === activeId)) {
+        const exists = state.messages.some(m => m._id === message._id);
+        if (exists) return state;
         return { messages: [...state.messages, message] };
       }
       return state;
     });
   },
 
-  // SaaS Extension Actions
+  updateMessage: (updatedMsg) => {
+    set((state) => ({
+      messages: state.messages.map(m => m._id === updatedMsg._id ? updatedMsg : m),
+    }));
+  },
+
+  removeMessage: (messageId) => {
+    set((state) => ({
+      messages: state.messages.filter(m => m._id !== messageId),
+    }));
+  },
+
+  // ===== Threads =====
+  activeThread: null,
+  threadReplies: [],
+
+  openThread: async (message) => {
+    set({ activeThread: message, threadReplies: [] });
+    try {
+      const res = await api.get(`/messages/thread/${message._id}`);
+      set({ threadReplies: res.data?.replies || [] });
+    } catch (err) {
+      console.error('openThread:', err.message);
+    }
+  },
+
+  closeThread: () => {
+    set({ activeThread: null, threadReplies: [] });
+  },
+
+  addThreadReply: (reply) => {
+    set((state) => {
+      if (state.activeThread?._id !== reply.threadId) return state;
+      const exists = state.threadReplies.some(r => r._id === reply._id);
+      if (exists) return state;
+      return { threadReplies: [...state.threadReplies, reply] };
+    });
+  },
+
+  // ===== DM Conversations =====
+  conversations: [],
+  activeConversation: null,
+  dmMessages: [],
+
+  fetchConversations: async () => {
+    try {
+      const res = await api.get('/conversations');
+      set({ conversations: res.data || [] });
+    } catch (err) {
+      console.error('fetchConversations:', err.message);
+    }
+  },
+
+  setActiveConversation: (conv) => {
+    set({ activeConversation: conv || null, dmMessages: [] });
+    if (conv?._id) get().fetchDmMessages(conv._id);
+  },
+
+  fetchDmMessages: async (conversationId) => {
+    try {
+      const res = await api.get(`/conversations/${conversationId}/messages`);
+      set({ dmMessages: res.data || [] });
+    } catch (err) {
+      console.error('fetchDmMessages:', err.message);
+    }
+  },
+
+  addDmMessage: (message) => {
+    set((state) => {
+      if (state.activeConversation?._id !== message.conversationId) return state;
+      const exists = state.dmMessages.some(m => m._id === message._id);
+      if (exists) return state;
+      return { dmMessages: [...state.dmMessages, message] };
+    });
+  },
+
+  // =====================
+  // NOTES (API-driven)
+  // =====================
+  notes: [],
+  activeNote: null,
+
+  fetchNotes: async (teamId) => {
+    try {
+      const res = await api.get(`/notes/team/${teamId}`);
+      set({ notes: res.data || [] });
+    } catch (err) {
+      console.error('fetchNotes:', err.message);
+    }
+  },
+
+  createNote: async (teamId, title, parentId = null) => {
+    try {
+      const res = await api.post('/notes', { teamId, title: title || 'Untitled', parentId });
+      set((state) => ({ notes: [res.data, ...state.notes] }));
+      return res.data;
+    } catch (err) {
+      console.error('createNote:', err.message);
+      throw err;
+    }
+  },
+
+  updateNote: async (noteId, data) => {
+    try {
+      const res = await api.put(`/notes/${noteId}`, data);
+      set((state) => ({
+        notes: state.notes.map(n => n._id === noteId ? res.data : n),
+        activeNote: state.activeNote?._id === noteId ? res.data : state.activeNote,
+      }));
+      return res.data;
+    } catch (err) {
+      console.error('updateNote:', err.message);
+      throw err;
+    }
+  },
+
+  deleteNote: async (noteId) => {
+    try {
+      await api.delete(`/notes/${noteId}`);
+      set((state) => ({
+        notes: state.notes.filter(n => n._id !== noteId && n.parentId !== noteId),
+        activeNote: state.activeNote?._id === noteId ? null : state.activeNote,
+      }));
+    } catch (err) {
+      console.error('deleteNote:', err.message);
+      throw err;
+    }
+  },
+
+  setActiveNote: (note) => {
+    set({ activeNote: note || null });
+  },
+
+  fetchNoteById: async (noteId) => {
+    try {
+      const res = await api.get(`/notes/detail/${noteId}`);
+      set({ activeNote: res.data });
+      return res.data;
+    } catch (err) {
+      console.error('fetchNoteById:', err.message);
+      return null;
+    }
+  },
+
+  // =====================
+  // ACTIVITY (API-driven)
+  // =====================
+  fetchTeamActivity: async (teamId) => {
+    try {
+      const res = await api.get(`/activity/${teamId}`);
+      set((state) => ({
+        teamActivity: { ...state.teamActivity, [teamId]: res.data || [] },
+      }));
+    } catch (err) {
+      console.error('fetchTeamActivity:', err.message);
+    }
+  },
+
+  getTeamActivity: (teamId) => {
+    return get().teamActivity[teamId] || [];
+  },
+
+  // =====================
+  // NOTIFICATIONS (API-driven)
+  // =====================
+  fetchNotifications: async () => {
+    try {
+      const res = await api.get('/notifications');
+      set({ notifications: res.data || [] });
+    } catch (err) {
+      console.error('fetchNotifications:', err.message);
+    }
+  },
+
+  markNotificationRead: async (notifId) => {
+    try {
+      await api.put(`/notifications/${notifId}/read`);
+      set((state) => ({
+        notifications: state.notifications.map(n =>
+          n._id === notifId ? { ...n, read: true } : n
+        ),
+      }));
+    } catch (err) {
+      console.error('markNotificationRead:', err.message);
+    }
+  },
+
+  markAllNotificationsRead: async () => {
+    try {
+      await api.put('/notifications/read-all');
+      set((state) => ({
+        notifications: state.notifications.map(n => ({ ...n, read: true })),
+      }));
+    } catch (err) {
+      console.error('markAllNotificationsRead:', err.message);
+    }
+  },
+
+  getUnreadCount: () => {
+    return get().notifications.filter(n => !n.read).length;
+  },
+
+  // =====================
+  // UI HELPERS (local only)
+  // =====================
   toggleStarredTeam: (teamId) => {
     set((state) => {
       const isStarred = state.starredTeams.includes(teamId);
-      return {
-        starredTeams: isStarred
-          ? state.starredTeams.filter(id => id !== teamId)
-          : [...state.starredTeams, teamId]
-      };
+      const next = isStarred
+        ? state.starredTeams.filter(id => id !== teamId)
+        : [...state.starredTeams, teamId];
+      localStorage.setItem('starredTeams', JSON.stringify(next));
+      return { starredTeams: next };
     });
   },
 
   addRecentItem: (item) => {
     set((state) => {
       const filtered = state.recentItems.filter(i => i.id !== item.id);
-      return { recentItems: [item, ...filtered].slice(0, 5) };
+      const next = [item, ...filtered].slice(0, 5);
+      localStorage.setItem('recentItems', JSON.stringify(next));
+      return { recentItems: next };
     });
   },
 
@@ -176,277 +574,32 @@ const useAppStore = create((set, get) => ({
     set((state) => ({ uiStates: { ...state.uiStates, [key]: value } }));
   },
 
-  // ===== Local Teams Methods =====
-  addTeam: (team) => {
-    if (!team || !team._id || !team.name) {
-      console.warn("[Store] addTeam called with invalid team:", team);
-      return;
-    }
-    // Seed default members, channels, activity, files, pinned notes for the new team
-    const seedMembers = mockMembers.map(m => ({ ...m, id: `${m.id}_${team._id}` }));
-    const seedChannels = [
-      { id: `ch_general_${team._id}`, _id: `ch_general_${team._id}`, name: 'general', type: 'public' },
-      { id: `ch_random_${team._id}`, _id: `ch_random_${team._id}`, name: 'random', type: 'public' },
-      { id: `ch_private_${team._id}`, _id: `ch_private_${team._id}`, name: 'leadership', type: 'private' },
-    ];
-    const now = Date.now();
-    const seedActivity = [
-      { id: `act1_${team._id}`, text: `Team "${team.name}" was created`, user: 'System', timestamp: now, color: 'indigo' },
-      { id: `act2_${team._id}`, text: 'Sarah Chen joined the team', user: 'Sarah Chen', timestamp: now - 60000, color: 'emerald' },
-      { id: `act3_${team._id}`, text: 'Channel #general was created', user: 'System', timestamp: now - 120000, color: 'blue' },
-    ];
-    const seedPinnedNotes = [
-      { id: `pin1_${team._id}`, text: 'Review the new Q3 Guidelines before pushing code to staging.' },
-    ];
-
-    set((state) => ({
-      teams: [...(Array.isArray(state.teams) ? state.teams : []), { ...team, members: seedMembers }],
-      teamMembers: { ...state.teamMembers, [team._id]: seedMembers },
-      teamChannels: { ...state.teamChannels, [team._id]: seedChannels },
-      teamActivity: { ...state.teamActivity, [team._id]: seedActivity },
-      teamFiles: { ...state.teamFiles, [team._id]: [...mockFiles] },
-      teamPinnedNotes: { ...state.teamPinnedNotes, [team._id]: seedPinnedNotes },
-    }));
+  reorderTeams: (newOrder) => {
+    set({ teams: newOrder });
   },
 
-  setActiveTeam: (team) => {
-    set({ activeTeam: team || null });
-    // Track in recent items
-    if (team?._id) {
-      get().addRecentItem({ id: team._id, type: 'team', name: team.name });
-    }
-  },
-
-  removeTeam: (teamId) => {
-    set((state) => {
-      const { [teamId]: _m, ...restMembers } = state.teamMembers;
-      const { [teamId]: _c, ...restChannels } = state.teamChannels;
-      const { [teamId]: _a, ...restActivity } = state.teamActivity;
-      const { [teamId]: _f, ...restFiles } = state.teamFiles;
-      const { [teamId]: _p, ...restPinned } = state.teamPinnedNotes;
-      return {
-        teams: state.teams.filter(t => t._id !== teamId),
-        activeTeam: state.activeTeam?._id === teamId ? null : state.activeTeam,
-        starredTeams: state.starredTeams.filter(id => id !== teamId),
-        teamMembers: restMembers,
-        teamChannels: restChannels,
-        teamActivity: restActivity,
-        teamFiles: restFiles,
-        teamPinnedNotes: restPinned,
-      };
-    });
-  },
-
-  // ===== Team Members =====
-  getTeamMembers: (teamId) => {
-    return get().teamMembers[teamId] || [];
-  },
-
-  addTeamMember: (teamId, member) => {
-    set((state) => {
-      const existing = state.teamMembers[teamId] || [];
-      const newActivity = {
-        id: `act_${Date.now()}`,
-        text: `${member.name} joined the team`,
-        user: member.name,
-        timestamp: Date.now(),
-        color: 'emerald',
-      };
-      const teamAct = state.teamActivity[teamId] || [];
-      return {
-        teamMembers: { ...state.teamMembers, [teamId]: [...existing, member] },
-        teamActivity: { ...state.teamActivity, [teamId]: [newActivity, ...teamAct] },
-      };
-    });
-  },
-
-  removeTeamMember: (teamId, memberId) => {
-    set((state) => {
-      const existing = state.teamMembers[teamId] || [];
-      const removed = existing.find(m => m.id === memberId);
-      const newActivity = removed ? {
-        id: `act_${Date.now()}`,
-        text: `${removed.name} was removed from the team`,
-        user: 'System',
-        timestamp: Date.now(),
-        color: 'red',
-      } : null;
-      const teamAct = state.teamActivity[teamId] || [];
-      return {
-        teamMembers: { ...state.teamMembers, [teamId]: existing.filter(m => m.id !== memberId) },
-        teamActivity: newActivity ? { ...state.teamActivity, [teamId]: [newActivity, ...teamAct] } : state.teamActivity,
-      };
-    });
-  },
-
-  updateMemberRole: (teamId, memberId, newRole) => {
-    set((state) => {
-      const existing = state.teamMembers[teamId] || [];
-      const member = existing.find(m => m.id === memberId);
-      const newActivity = member ? {
-        id: `act_${Date.now()}`,
-        text: `${member.name}'s role changed to ${newRole}`,
-        user: 'System',
-        timestamp: Date.now(),
-        color: 'indigo',
-      } : null;
-      const teamAct = state.teamActivity[teamId] || [];
-      return {
-        teamMembers: {
-          ...state.teamMembers,
-          [teamId]: existing.map(m => m.id === memberId ? { ...m, role: newRole } : m),
-        },
-        teamActivity: newActivity ? { ...state.teamActivity, [teamId]: [newActivity, ...teamAct] } : state.teamActivity,
-      };
-    });
-  },
-
-  // ===== Team Channels =====
-  getTeamChannels: (teamId) => {
-    return get().teamChannels[teamId] || [];
-  },
-
-  getAllTeamChannels: () => {
-    const state = get();
-    return Object.entries(state.teamChannels || {}).flatMap(([teamId, chs]) =>
-      (chs || []).map(ch => ({ ...ch, _id: ch._id || ch.id, teamId }))
-    );
-  },
-
-  findChannelById: (channelId) => {
-    const state = get();
-    for (const [teamId, chs] of Object.entries(state.teamChannels || {})) {
-      const found = (chs || []).find(ch => (ch._id || ch.id) === channelId);
-      if (found) return { ...found, _id: found._id || found.id, teamId };
-    }
-    return null;
-  },
-
-  addTeamChannel: (teamId, channel) => {
-    // Normalize: ensure both id and _id exist
-    const normalized = { ...channel, _id: channel._id || channel.id, id: channel.id || channel._id };
-    set((state) => {
-      const existing = state.teamChannels[teamId] || [];
-      const newActivity = {
-        id: `act_${Date.now()}`,
-        text: `Channel #${normalized.name} was created`,
-        user: 'System',
-        timestamp: Date.now(),
-        color: 'blue',
-      };
-      const teamAct = state.teamActivity[teamId] || [];
-      return {
-        teamChannels: { ...state.teamChannels, [teamId]: [...existing, normalized] },
-        teamActivity: { ...state.teamActivity, [teamId]: [newActivity, ...teamAct] },
-      };
-    });
-  },
-
-  // ===== Team Activity =====
-  getTeamActivity: (teamId) => {
-    return get().teamActivity[teamId] || [];
-  },
-
-  addTeamActivity: (teamId, activity) => {
-    set((state) => {
-      const existing = state.teamActivity[teamId] || [];
-      return {
-        teamActivity: { ...state.teamActivity, [teamId]: [activity, ...existing] },
-      };
-    });
-  },
-
-  // ===== Team Files =====
-  getTeamFiles: (teamId) => {
-    return get().teamFiles[teamId] || [];
-  },
-
-  addTeamFile: (teamId, file) => {
-    set((state) => {
-      const existing = state.teamFiles[teamId] || [];
-      const newActivity = {
-        id: `act_${Date.now()}`,
-        text: `${file.uploadedBy} uploaded ${file.name}`,
-        user: file.uploadedBy,
-        timestamp: Date.now(),
-        color: 'purple',
-      };
-      const teamAct = state.teamActivity[teamId] || [];
-      return {
-        teamFiles: { ...state.teamFiles, [teamId]: [file, ...existing] },
-        teamActivity: { ...state.teamActivity, [teamId]: [newActivity, ...teamAct] },
-      };
-    });
-  },
-
-  // ===== Pinned Notes =====
-  getTeamPinnedNotes: (teamId) => {
-    return get().teamPinnedNotes[teamId] || [];
-  },
-
-  addPinnedNote: (teamId, note) => {
-    set((state) => {
-      const existing = state.teamPinnedNotes[teamId] || [];
-      return {
-        teamPinnedNotes: { ...state.teamPinnedNotes, [teamId]: [...existing, note] },
-      };
-    });
-  },
-
-  removePinnedNote: (teamId, noteId) => {
-    set((state) => {
-      const existing = state.teamPinnedNotes[teamId] || [];
-      return {
-        teamPinnedNotes: { ...state.teamPinnedNotes, [teamId]: existing.filter(n => n.id !== noteId) },
-      };
-    });
-  },
-
-  // ===== Notifications =====
-  markNotificationRead: (notifId) => {
-    set((state) => ({
-      notifications: state.notifications.map(n => n.id === notifId ? { ...n, read: true } : n),
-    }));
-  },
-
-  markAllNotificationsRead: () => {
-    set((state) => ({
-      notifications: state.notifications.map(n => ({ ...n, read: true })),
-    }));
-  },
-
-  addNotification: (notif) => {
-    set((state) => ({
-      notifications: [notif, ...state.notifications],
-    }));
-  },
-
-  getUnreadCount: () => {
-    return get().notifications.filter(n => !n.read).length;
-  },
-
-  // ===== Search =====
+  // ===== Search (searches local cache) =====
   searchAll: (query) => {
     if (!query.trim()) return { teams: [], channels: [], members: [] };
     const q = query.toLowerCase();
     const state = get();
-    const matchedTeams = (state.teams || []).filter(t => t.name.toLowerCase().includes(q));
-    // Flatten all team channels
+    const matchedTeams = (state.teams || []).filter(t => t.name?.toLowerCase().includes(q));
     const allChannels = Object.entries(state.teamChannels || {}).flatMap(([teamId, chs]) =>
       (chs || []).map(ch => ({ ...ch, teamId }))
     );
-    const matchedChannels = allChannels.filter(c => c.name.toLowerCase().includes(q));
-    // Flatten all team members
-    const allMembers = Object.entries(state.teamMembers || {}).flatMap(([teamId, ms]) =>
-      (ms || []).map(m => ({ ...m, teamId }))
+    const matchedChannels = allChannels.filter(c => c.name?.toLowerCase().includes(q));
+    // Search members across all teams
+    const allMembers = (state.teams || []).flatMap(t =>
+      (t.members || []).map(m => ({
+        id: m.userId?._id || m.userId,
+        name: m.userId?.name || 'Unknown',
+        avatar: m.userId?.avatar || `https://i.pravatar.cc/150?u=${m.userId?._id}`,
+        title: m.role,
+        teamId: t._id,
+      }))
     );
-    const matchedMembers = allMembers.filter(m => m.name.toLowerCase().includes(q));
+    const matchedMembers = allMembers.filter(m => m.name?.toLowerCase().includes(q));
     return { teams: matchedTeams.slice(0, 5), channels: matchedChannels.slice(0, 5), members: matchedMembers.slice(0, 5) };
-  },
-
-  // ===== Reorder Teams =====
-  reorderTeams: (newOrder) => {
-    set({ teams: newOrder });
   },
 }));
 

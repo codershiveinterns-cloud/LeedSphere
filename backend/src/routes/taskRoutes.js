@@ -1,9 +1,11 @@
 import express from 'express';
-import { createTask, getTasks, updateTaskStatus } from '../controllers/taskController.js';
+import { createTask, getTasks, updateTask, deleteTask } from '../controllers/taskController.js';
+import { protect } from '../middleware/auth.js';
 
 const router = express.Router();
-router.post('/', createTask);
-router.get('/:projectId', getTasks);
-router.put('/:taskId', updateTaskStatus);
+router.post('/', protect, createTask);
+router.put('/:taskId', protect, updateTask);
+router.delete('/:taskId', protect, deleteTask);
+router.get('/:projectId', protect, getTasks);
 
 export default router;

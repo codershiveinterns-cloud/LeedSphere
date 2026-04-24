@@ -17,7 +17,13 @@ export const sendMessage = async (req, res) => {
       threadId: threadId || null,
     });
 
-    res.status(201).json(message);
+    // Update parent's reply count if this is a thread reply
+    if (threadId) {
+      await Message.findByIdAndUpdate(threadId, { $inc: { replyCount: 1 } });
+    }
+
+    const populated = await Message.findById(message._id).populate('senderId', 'name avatar');
+    res.status(201).json(populated);
   } catch (err) {
     res.status(500).json({ message: err.message });
   }
@@ -26,7 +32,6 @@ export const sendMessage = async (req, res) => {
 // GET /api/messages/:channelId
 export const getMessagesByChannel = async (req, res) => {
   try {
-    // Get top-level messages (not thread replies)
     const filter = {
       $or: [
         { channelId: req.params.channelId },
@@ -34,7 +39,10 @@ export const getMessagesByChannel = async (req, res) => {
       ],
       threadId: null,
     };
-    const messages = await Message.find(filter).sort({ createdAt: 1 }).populate('senderId', 'name avatar');
+    const messages = await Message.find(filter)
+      .sort({ createdAt: 1 })
+      .populate('senderId', 'name avatar')
+      .populate('reactions.userId', 'name');
     res.json(messages);
   } catch (err) {
     res.status(500).json({ message: err.message });
@@ -44,8 +52,15 @@ export const getMessagesByChannel = async (req, res) => {
 // GET /api/messages/thread/:messageId
 export const getThreadReplies = async (req, res) => {
   try {
-    const replies = await Message.find({ threadId: req.params.messageId }).sort({ createdAt: 1 }).populate('senderId', 'name avatar');
-    res.json(replies);
+    // Return parent message + replies
+    const parent = await Message.findById(req.params.messageId)
+      .populate('senderId', 'name avatar')
+      .populate('reactions.userId', 'name');
+    const replies = await Message.find({ threadId: req.params.messageId })
+      .sort({ createdAt: 1 })
+      .populate('senderId', 'name avatar')
+      .populate('reactions.userId', 'name');
+    res.json({ parent, replies });
   } catch (err) {
     res.status(500).json({ message: err.message });
   }
@@ -56,8 +71,6 @@ export const editMessage = async (req, res) => {
   try {
     const message = await Message.findById(req.params.id);
     if (!message) return res.status(404).json({ message: 'Message not found' });
-
-    // Only sender can edit
     if (message.senderId && message.senderId.toString() !== req.user._id.toString()) {
       return res.status(403).json({ message: 'You can only edit your own messages' });
     }
@@ -65,7 +78,11 @@ export const editMessage = async (req, res) => {
     message.content = req.body.content || message.content;
     message.edited = true;
     await message.save();
-    res.json(message);
+
+    const populated = await Message.findById(message._id)
+      .populate('senderId', 'name avatar')
+      .populate('reactions.userId', 'name');
+    res.json(populated);
   } catch (err) {
     res.status(500).json({ message: err.message });
   }
@@ -76,15 +93,53 @@ export const deleteMessage = async (req, res) => {
   try {
     const message = await Message.findById(req.params.id);
     if (!message) return res.status(404).json({ message: 'Message not found' });
-
     if (message.senderId && message.senderId.toString() !== req.user._id.toString()) {
       return res.status(403).json({ message: 'You can only delete your own messages' });
     }
 
+    const channelId = message.channelId;
+    const threadId = message.threadId;
     await Message.findByIdAndDelete(req.params.id);
-    // Also delete thread replies
     await Message.deleteMany({ threadId: req.params.id });
-    res.json({ message: 'Message deleted' });
+
+    // Decrement parent reply count if this was a thread reply
+    if (threadId) {
+      await Message.findByIdAndUpdate(threadId, { $inc: { replyCount: -1 } });
+    }
+
+    res.json({ message: 'Message deleted', messageId: req.params.id, channelId });
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+};
+
+// POST /api/messages/:id/react
+export const toggleReaction = async (req, res) => {
+  try {
+    const { emoji } = req.body;
+    if (!emoji) return res.status(400).json({ message: 'emoji is required' });
+
+    const message = await Message.findById(req.params.id);
+    if (!message) return res.status(404).json({ message: 'Message not found' });
+
+    const existingIndex = message.reactions.findIndex(
+      r => r.userId.toString() === req.user._id.toString() && r.emoji === emoji
+    );
+
+    if (existingIndex >= 0) {
+      // Remove reaction (toggle off)
+      message.reactions.splice(existingIndex, 1);
+    } else {
+      // Add reaction
+      message.reactions.push({ userId: req.user._id, emoji });
+    }
+
+    await message.save();
+
+    const populated = await Message.findById(message._id)
+      .populate('senderId', 'name avatar')
+      .populate('reactions.userId', 'name');
+    res.json(populated);
   } catch (err) {
     res.status(500).json({ message: err.message });
   }

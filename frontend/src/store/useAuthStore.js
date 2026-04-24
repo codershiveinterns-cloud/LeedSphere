@@ -10,38 +10,38 @@ const useAuthStore = create((set) => ({
   login: async (email, password) => {
     set({ isLoading: true, error: null });
     try {
-      const mockUser = {
-        _id: Math.random().toString(36).substr(2, 9),
-        name: email.split('@')[0],
-        email: email
-      };
-      set({ user: mockUser, isAuthenticated: true, isLoading: false });
-      localStorage.setItem('user', JSON.stringify(mockUser));
+      const res = await api.post('/auth/login', { email, password });
+      const user = res.data;
+      set({ user, isAuthenticated: true, isLoading: false });
+      localStorage.setItem('user', JSON.stringify(user));
+      return user;
     } catch (error) {
-      set({ error: 'Login failed', isLoading: false });
-      throw error;
+      const msg = error.response?.data?.message || 'Login failed';
+      set({ error: msg, isLoading: false });
+      throw new Error(msg);
     }
   },
 
   register: async (name, email, password) => {
     set({ isLoading: true, error: null });
     try {
-      const mockUser = {
-        _id: Math.random().toString(36).substr(2, 9),
-        name: name,
-        email: email
-      };
-      set({ user: mockUser, isAuthenticated: true, isLoading: false });
-      localStorage.setItem('user', JSON.stringify(mockUser));
+      const res = await api.post('/auth/register', { name, email, password });
+      const user = res.data;
+      set({ user, isAuthenticated: true, isLoading: false });
+      localStorage.setItem('user', JSON.stringify(user));
+      return user;
     } catch (error) {
-      set({ error: 'Registration failed', isLoading: false });
-      throw error;
+      const msg = error.response?.data?.message || 'Registration failed';
+      set({ error: msg, isLoading: false });
+      throw new Error(msg);
     }
   },
 
-  logout: async () => {
+  logout: () => {
     set({ user: null, isAuthenticated: false });
     localStorage.removeItem('user');
+    localStorage.removeItem('starredTeams');
+    localStorage.removeItem('recentItems');
   },
 }));
 

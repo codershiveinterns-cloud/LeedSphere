@@ -1,9 +1,12 @@
 import express from 'express';
-import { createProject, getProjects, mergeProjects } from '../controllers/projectController.js';
+import { createProject, getProjects, updateProject, deleteProject, mergeProjects } from '../controllers/projectController.js';
+import { protect } from '../middleware/auth.js';
 
 const router = express.Router();
-router.post('/', createProject);
-router.get('/:workspaceId', getProjects);
-router.post('/merge', mergeProjects);
+router.post('/', protect, createProject);
+router.post('/merge', protect, mergeProjects);
+router.put('/:id', protect, updateProject);
+router.delete('/:id', protect, deleteProject);
+router.get('/:workspaceId', protect, getProjects);
 
 export default router;

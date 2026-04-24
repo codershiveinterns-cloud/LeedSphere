@@ -24,15 +24,15 @@ const Sidebar = () => {
 
   return (
     <>
-      <div className="w-16 md:w-20 bg-[#0e1116] border-r border-gray-800 flex flex-col items-center py-4 gap-4 flex-shrink-0 h-full">
+      <div className="w-16 md:w-20 bg-slate-100 dark:bg-[#0e1116] border-r border-slate-200 dark:border-gray-800 flex flex-col items-center py-4 gap-4 flex-shrink-0 h-full transition-colors duration-200">
         {(Array.isArray(workspaces) ? workspaces : []).map((workspace) => (
           <button
             key={workspace._id}
             onClick={() => setActiveWorkspace(workspace)}
-            className={`w-12 h-12 rounded-xl flex items-center justify-center text-lg font-bold transition-all shadow-lg ${
+            className={`w-12 h-12 rounded-xl flex items-center justify-center text-lg font-bold transition-all shadow-sm active:scale-95 ${
               activeWorkspace?._id === workspace._id
                 ? 'bg-indigo-600 text-white shadow-indigo-500/20'
-                : 'bg-[#1c212b] text-gray-400 hover:bg-[#252b36] hover:text-white'
+                : 'bg-white dark:bg-[#1c212b] text-slate-500 dark:text-gray-400 hover:bg-slate-50 dark:hover:bg-[#252b36] hover:text-slate-900 dark:hover:text-white border border-slate-200 dark:border-transparent'
             }`}
             title={workspace.name}
           >
@@ -42,7 +42,7 @@ const Sidebar = () => {
 
         <button
           onClick={() => setIsModalOpen(true)}
-          className="w-12 h-12 rounded-xl flex items-center justify-center bg-gray-800/50 text-emerald-400 hover:bg-emerald-500/10 hover:text-emerald-300 transition-all border border-dashed border-gray-700 hover:border-emerald-500/50"
+          className="w-12 h-12 rounded-xl flex items-center justify-center bg-white dark:bg-gray-800/50 text-emerald-600 dark:text-emerald-400 hover:bg-emerald-50 dark:hover:bg-emerald-500/10 hover:text-emerald-700 dark:hover:text-emerald-300 transition-all border border-dashed border-slate-300 dark:border-gray-700 hover:border-emerald-400 dark:hover:border-emerald-500/50 active:scale-95"
           title="Add Workspace"
         >
           <Plus size={24} />
@@ -52,19 +52,19 @@ const Sidebar = () => {
       <Modal isOpen={isModalOpen} onClose={() => setIsModalOpen(false)} title="Create a Workspace">
         <form onSubmit={submitWorkspace} className="flex flex-col gap-4">
           <div>
-            <label className="block text-sm font-medium text-gray-300 mb-1">Workspace Name</label>
-            <input 
-              type="text" 
+            <label className="block text-sm font-medium text-slate-700 dark:text-gray-300 mb-1">Workspace Name</label>
+            <input
+              type="text"
               autoFocus
               value={workspaceName}
               onChange={(e) => setWorkspaceName(e.target.value)}
-              className="w-full bg-[#0d1117] border border-gray-700 rounded-lg px-4 py-2 text-white focus:ring-1 focus:ring-indigo-500 focus:border-indigo-500 outline-none transition-all placeholder-gray-600"
+              className="w-full bg-white dark:bg-[#0d1117] border border-slate-200 dark:border-gray-700 rounded-lg px-4 py-2 text-slate-900 dark:text-white focus:ring-1 focus:ring-indigo-500 focus:border-indigo-500 outline-none transition-all placeholder-slate-400 dark:placeholder-gray-600"
               placeholder="e.g. Acme Corp"
             />
           </div>
           <div className="flex justify-end gap-3 mt-4">
-            <button type="button" onClick={() => setIsModalOpen(false)} className="px-4 py-2 text-sm font-medium text-gray-400 hover:text-white transition-colors">Cancel</button>
-            <button type="submit" disabled={!workspaceName.trim()} className="px-5 py-2 text-sm font-medium bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg disabled:opacity-50 transition-colors">Create</button>
+            <button type="button" onClick={() => setIsModalOpen(false)} className="px-4 py-2 text-sm font-medium text-slate-500 dark:text-gray-400 hover:text-slate-900 dark:hover:text-white transition-colors active:scale-95">Cancel</button>
+            <button type="submit" disabled={!workspaceName.trim()} className="px-5 py-2 text-sm font-medium bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg disabled:opacity-50 transition-colors active:scale-95">Create</button>
           </div>
         </form>
       </Modal>

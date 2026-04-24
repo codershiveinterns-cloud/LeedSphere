@@ -100,17 +100,44 @@ export const deleteTeam = async (req, res) => {
 // POST /api/teams/:id/members
 export const addMember = async (req, res) => {
   try {
-    const { userId, role } = req.body;
+    const { userId, role, designation } = req.body;
     const team = await Team.findById(req.params.id);
     if (!team) return res.status(404).json({ message: 'Team not found' });
 
     const alreadyMember = team.members.some(m => m.userId.toString() === userId);
     if (alreadyMember) return res.status(400).json({ message: 'User is already a member' });
 
-    team.members.push({ userId, role: role || 'member' });
+    team.members.push({ userId, role: role || 'member', designation: designation || '' });
     await team.save();
 
     await Activity.create({ userId: req.user._id, action: `Added a member to "${team.name}"`, teamId: team._id });
+
+    const populated = await Team.findById(team._id).populate('members.userId', 'name email avatar');
+    res.json(populated);
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+};
+
+// PUT /api/teams/:id/members/:userId — update role or designation
+export const updateMember = async (req, res) => {
+  try {
+    const { role, designation } = req.body;
+    const team = await Team.findById(req.params.id);
+    if (!team) return res.status(404).json({ message: 'Team not found' });
+
+    const member = team.members.find(m => m.userId.toString() === req.params.userId);
+    if (!member) return res.status(404).json({ message: 'Member not found' });
+
+    if (role) member.role = role;
+    if (designation !== undefined) member.designation = designation;
+    await team.save();
+
+    await Activity.create({
+      userId: req.user._id,
+      action: `Updated ${req.params.userId}'s role/designation in "${team.name}"`,
+      teamId: team._id,
+    });
 
     const populated = await Team.findById(team._id).populate('members.userId', 'name email avatar');
     res.json(populated);
