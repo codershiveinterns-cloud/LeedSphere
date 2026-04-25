@@ -2,17 +2,27 @@ import { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { LogIn, Mail, Lock, ArrowRight } from 'lucide-react';
 import useAuthStore from '../store/useAuthStore';
+import useCurrentTeamStore, { pickPreferredMembership } from '../store/useCurrentTeamStore';
 
 const Login = () => {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const { login, isLoading, error } = useAuthStore();
+  const setCurrentTeam = useCurrentTeamStore((s) => s.setCurrentTeam);
   const navigate = useNavigate();
 
   const handleSubmit = async (e) => {
     e.preventDefault();
     try {
-      await login(email, password);
+      const { memberships } = await login(email, password);
+
+      // Land directly on the dashboard. With multiple teams we auto-pick the
+      // last active (or the first), matching Slack's behavior — users can
+      // switch teams later from the header. No forced "Choose Team" screen.
+      if (memberships && memberships.length > 0) {
+        const pick = pickPreferredMembership(memberships);
+        if (pick) setCurrentTeam(pick);
+      }
       navigate('/dashboard');
     } catch {
       // Error is handled in the store

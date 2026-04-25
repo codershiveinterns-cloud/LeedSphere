@@ -2,6 +2,7 @@ import { useEffect, useState, useRef } from 'react';
 import { useNavigate, Outlet } from 'react-router-dom';
 import useAuthStore from '../store/useAuthStore';
 import useAppStore from '../store/useAppStore';
+import useCurrentTeamStore from '../store/useCurrentTeamStore';
 import useSearchStore from '../store/useSearchStore';
 import Sidebar from '../components/Sidebar';
 import InnerSidebar from '../components/InnerSidebar';
@@ -85,7 +86,10 @@ const InviteBanner = () => {
 const Dashboard = () => {
   const { user } = useAuthStore();
   const navigate = useNavigate();
-  const [simulatedRole, setSimulatedRole] = useState('Admin');
+  const currentTeam = useCurrentTeamStore((s) => s.currentTeam);
+  // Derived, per-team role. Defaults to the least-privileged 'member' when
+  // the user has no active team context — we never assume admin.
+  const myRole = currentTeam?.role || 'member';
   const [isRightPanelOpen, setIsRightPanelOpen] = useState(false);
   const hasFetched = useRef(false);
 
@@ -96,7 +100,12 @@ const Dashboard = () => {
     }
     if (!hasFetched.current) {
       hasFetched.current = true;
-      useAppStore.getState().fetchWorkspaces();
+      // Workspaces + teams are loaded by RequireTeam's bootstrapAppData().
+      // Zero-team users (onboarding path) still need them, so fetch defensively
+      // — it's a no-op when already populated.
+      if (!useAppStore.getState().workspaces.length) {
+        useAppStore.getState().fetchWorkspaces();
+      }
       useAppStore.getState().fetchNotifications();
     }
   }, [user, navigate]);
@@ -118,13 +127,22 @@ const Dashboard = () => {
 
   return (
     <div className="h-screen w-full bg-[#f5f6f8] dark:bg-[#0d1117] flex flex-col font-sans transition-colors duration-200">
-      <Header simulatedRole={simulatedRole} setSimulatedRole={setSimulatedRole} />
+      <Header />
       <InviteBanner />
 
       <main className="flex-1 flex overflow-hidden relative">
-        <Sidebar simulatedRole={simulatedRole} />
+        <Sidebar />
         <InnerSidebar />
-        <Outlet context={{ simulatedRole, toggleRightPanel: (forceOpen) => setIsRightPanelOpen(typeof forceOpen === 'boolean' ? forceOpen : p => !p) }} />
+        {/*
+         * Keep `simulatedRole` in the outlet context for legacy pages that still
+         * read it, but bind it to the real per-team role (never "admin" by default).
+         * Values: 'admin' | 'manager' | 'member'.
+         */}
+        <Outlet context={{
+          myRole,
+          simulatedRole: myRole.charAt(0).toUpperCase() + myRole.slice(1),
+          toggleRightPanel: (forceOpen) => setIsRightPanelOpen(typeof forceOpen === 'boolean' ? forceOpen : p => !p),
+        }} />
         <RightPanel isOpen={isRightPanelOpen} onClose={() => setIsRightPanelOpen(false)} />
       </main>
 

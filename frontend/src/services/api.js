@@ -5,7 +5,7 @@ const api = axios.create({
   withCredentials: true,
 });
 
-// Attach JWT token to every request
+// Attach JWT token + current team id to every request.
 api.interceptors.request.use((config) => {
   const stored = localStorage.getItem('user');
   if (stored) {
@@ -18,6 +18,29 @@ api.interceptors.request.use((config) => {
       // invalid stored data
     }
   }
+
+  // Send the active team + workspace ids with every request so backend
+  // middleware can resolve role + scope queries. Reads directly from the
+  // zustand `persist` blob to avoid a circular import with the store.
+  //   team-storage shape: { state: { currentTeam: { teamId, role, workspaceId } }, version }
+  try {
+    const teamRaw = localStorage.getItem('team-storage');
+    if (teamRaw) {
+      const parsed = JSON.parse(teamRaw);
+      const ct = parsed?.state?.currentTeam;
+      if (ct?.teamId) {
+        config.headers['X-Team-Id'] = ct.teamId;
+        config.headers['teamId'] = ct.teamId; // spec-requested header name
+      }
+      if (ct?.workspaceId) {
+        config.headers['X-Workspace-Id'] = ct.workspaceId;
+        config.headers['workspaceId'] = ct.workspaceId;
+      }
+    }
+  } catch {
+    // ignore
+  }
+
   return config;
 });
 

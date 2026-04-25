@@ -8,7 +8,7 @@ import {
   Clock, Flag, ListTodo, FileStack, Users, GitBranch,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
-import { useOutletContext } from 'react-router-dom';
+import useCurrentTeamStore from '../store/useCurrentTeamStore';
 
 /* ============================================================ */
 /*                         CONSTANTS                            */
@@ -124,7 +124,7 @@ const SKELETON = 'ls-skeleton bg-slate-200/80 dark:bg-gray-700/50 rounded-lg';
 
 const ProjectWorkspace = () => {
   const { activeWorkspace, activeTeam, getTeamMembers } = useAppStore();
-  const { simulatedRole } = useOutletContext();
+  const myRole = useCurrentTeamStore((s) => s.currentTeam?.role) || 'member';
 
   const [projects, setProjects] = useState([]);
   const [projectsLoading, setProjectsLoading] = useState(false);
@@ -150,7 +150,7 @@ const ProjectWorkspace = () => {
   const [tAssignee, setTAssignee] = useState('');
   const [tDue, setTDue] = useState('');
 
-  const isMember = simulatedRole === 'Member';
+  const isMember = myRole === 'member';
   const teamMembers = activeTeam ? getTeamMembers(activeTeam._id) : [];
 
   useEffect(() => {

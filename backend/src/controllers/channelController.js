@@ -111,9 +111,26 @@ export const getChannelsByTeam = async (req, res) => {
 };
 
 // GET /api/channels/:workspaceId  (backward-compat)
+// Returns channels visible to the caller within the workspace:
+//   - public channels in teams the user belongs to
+//   - private channels where the user is in members[]
 export const getChannelsByWorkspace = async (req, res) => {
   try {
-    const channels = await Channel.find({ workspaceId: req.params.workspaceId }).lean();
+    const me = req.user._id;
+    const myTeamIds = await Team.find({
+      workspaceId: req.params.workspaceId,
+      'members.userId': me,
+    }).distinct('_id');
+
+    const channels = await Channel.find({
+      workspaceId: req.params.workspaceId,
+      teamId: { $in: myTeamIds },
+      $or: [
+        { isPrivate: false, type: { $ne: 'private' } },
+        { members: me },
+      ],
+    }).lean();
+
     res.json(channels);
   } catch (err) {
     res.status(500).json({ message: err.message });

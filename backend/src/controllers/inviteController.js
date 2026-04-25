@@ -2,6 +2,7 @@ import Invite from '../models/Invite.js';
 import Team from '../models/Team.js';
 import User from '../models/User.js';
 import Activity from '../models/Activity.js';
+import { ensureWorkspaceMember } from './workspaceController.js';
 
 // POST /api/invites — create an invite (no email sent)
 export const createInvite = async (req, res) => {
@@ -104,6 +105,11 @@ export const acceptInvite = async (req, res) => {
       });
       await team.save();
     }
+
+    // Mirror membership at the workspace level so the invitee sees the
+    // workspace in /api/workspaces. Idempotent — no-op if they were
+    // already a workspace member from a previous invite.
+    await ensureWorkspaceMember(team.workspaceId, req.user._id, 'member');
 
     invite.status = 'accepted';
     await invite.save();

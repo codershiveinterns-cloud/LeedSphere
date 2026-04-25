@@ -1,5 +1,7 @@
 import Team from '../models/Team.js';
 import Activity from '../models/Activity.js';
+import { findUserTeams, findUserTeamMembership } from '../services/teamMember.js';
+import { ensureWorkspaceMember } from './workspaceController.js';
 
 // POST /api/teams
 export const createTeam = async (req, res) => {
@@ -16,6 +18,10 @@ export const createTeam = async (req, res) => {
       createdBy: req.user._id,
       members: [{ userId: req.user._id, role: 'admin' }],
     });
+
+    // Make sure the team creator is also tracked as a workspace member so
+    // the workspace shows up in their /api/workspaces list.
+    await ensureWorkspaceMember(workspaceId, req.user._id, 'member');
 
     await Activity.create({
       userId: req.user._id,
@@ -46,10 +52,15 @@ export const getTeams = async (req, res) => {
   }
 };
 
-// GET /api/teams/:workspaceId (backward compat — returns all teams in workspace)
+// GET /api/teams/:workspaceId
+// Returns ONLY teams in this workspace where the caller is a team member.
+// Previously this leaked every team in the workspace — fixed.
 export const getTeamsByWorkspace = async (req, res) => {
   try {
-    const teams = await Team.find({ workspaceId: req.params.workspaceId }).populate('members.userId', 'name email avatar');
+    const teams = await Team.find({
+      workspaceId: req.params.workspaceId,
+      'members.userId': req.user._id,
+    }).populate('members.userId', 'name email avatar');
     res.json(teams);
   } catch (err) {
     res.status(500).json({ message: err.message });
@@ -62,6 +73,53 @@ export const getTeamById = async (req, res) => {
     const team = await Team.findById(req.params.id).populate('members.userId', 'name email avatar');
     if (!team) return res.status(404).json({ message: 'Team not found' });
     res.json(team);
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+};
+
+// GET /api/teams/my
+// Returns the caller's TeamMember records with populated team + workspace.
+// Used right after login to drive 0/1/N onboarding, and as the source for
+// the team switcher.
+export const getMyTeams = async (req, res) => {
+  try {
+    const memberships = await findUserTeams(req.user._id);
+    res.json({ memberships });
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+};
+
+// GET /api/teams/:teamId/me
+// Refresh-safety endpoint. Verifies the caller is still a member of the team
+// in localStorage and returns { team, role }. 403 when the membership is gone
+// so the frontend can drop the stale entry and route back to team selection.
+export const getTeamWithMyRole = async (req, res) => {
+  try {
+    const membership = await findUserTeamMembership(req.user._id, req.params.teamId);
+    if (!membership) {
+      return res.status(403).json({ message: 'You are not a member of this team' });
+    }
+    const team = await Team.findById(req.params.teamId)
+      .populate('workspaceId', 'name')
+      .lean();
+    if (!team) return res.status(404).json({ message: 'Team not found' });
+
+    res.json({
+      team: {
+        _id: team._id,
+        name: team.name,
+        description: team.description,
+        workspaceId: team.workspaceId?._id || team.workspaceId,
+        workspace: team.workspaceId && typeof team.workspaceId === 'object'
+          ? { _id: team.workspaceId._id, name: team.workspaceId.name }
+          : null,
+      },
+      role: membership.role,
+      designation: membership.designation || '',
+      joinedAt: membership.joinedAt,
+    });
   } catch (err) {
     res.status(500).json({ message: err.message });
   }

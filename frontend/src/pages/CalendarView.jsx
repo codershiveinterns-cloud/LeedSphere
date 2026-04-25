@@ -3,7 +3,7 @@ import useAppStore from '../store/useAppStore';
 import api from '../services/api';
 import toast from 'react-hot-toast';
 import { Calendar as CalIcon, ChevronLeft, ChevronRight, Plus, X, Clock, MapPin, Link2, Flag, Trash2, Edit2, Video, CheckSquare, AlertTriangle, Star } from 'lucide-react';
-import { useOutletContext } from 'react-router-dom';
+import useCurrentTeamStore from '../store/useCurrentTeamStore';
 import Modal from '../components/common/Modal';
 
 const TYPE_CONFIG = {
@@ -17,7 +17,7 @@ const DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
 const CalendarView = () => {
   const { activeWorkspace } = useAppStore();
-  const { simulatedRole } = useOutletContext();
+  const myRole = useCurrentTeamStore((s) => s.currentTeam?.role) || 'member';
   const [events, setEvents] = useState([]);
   const [currentDate, setCurrentDate] = useState(new Date());
   const [view, setView] = useState('month');
@@ -96,7 +96,7 @@ const CalendarView = () => {
   };
 
   const openCreateModal = (prefillDate) => {
-    if (simulatedRole === 'Member') return toast.error('Restricted to Admins/Managers');
+    if (myRole === 'member') return toast.error('Restricted to Admins/Managers');
     const dateStr = prefillDate ? new Date(prefillDate.getTime() - prefillDate.getTimezoneOffset() * 60000).toISOString().slice(0, 16) : '';
     setForm({ title: '', description: '', type: 'event', startDate: dateStr, endDate: '', allDay: false, location: '', meetingLink: '', priority: 'medium', assignedTo: [] });
     setEditingEvent(null);

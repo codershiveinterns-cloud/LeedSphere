@@ -34,6 +34,33 @@ const useAppStore = create((set, get) => ({
 
   _fetchingWorkspaces: false,
 
+  /**
+   * Wipe every user-scoped slice of state. Called from useAuthStore on
+   * logout AND at the start of login so a session for User B never starts
+   * with User A's workspaces, teams, channels, or activity in memory.
+   * Without this, login → dashboard would briefly render the previous
+   * user's data (a hard refresh resets the closure, which is exactly why
+   * "after refresh it works" was the symptom).
+   */
+  reset: () => set({
+    workspaces: [],
+    activeWorkspace: null,
+    teams: [],
+    activeTeam: null,
+    activeChannel: null,
+    messages: [],
+    teamChannels: {},
+    teamActivity: {},
+    notifications: [],
+    pendingInvites: [],
+    // Thread / DM transient state
+    activeThread: null,
+    threadReplies: [],
+    // UI dropdowns
+    uiStates: { isGlobalPlusOpen: false, isNotificationsOpen: false },
+    _fetchingWorkspaces: false,
+  }),
+
   // =====================
   // WORKSPACE ACTIONS
   // =====================
@@ -54,6 +81,58 @@ const useAppStore = create((set, get) => ({
       set({ workspaces: [] });
     } finally {
       set({ _fetchingWorkspaces: false });
+    }
+  },
+
+  /**
+   * Refresh-safety bootstrap. Called once by <RequireTeam> after the
+   * current team has been verified against MongoDB. Loads workspaces and
+   * the team list for currentTeam.workspaceId, then makes the matching
+   * workspace + team the "active" ones so downstream pages (TeamDetails,
+   * channels, notes) have valid context immediately — no more
+   * "Team not found" race on refresh.
+   *
+   * Returns only after workspaces + teams are in state.
+   */
+  bootstrapAppData: async (currentTeam) => {
+    if (!currentTeam?.teamId) return;
+
+    try {
+      // Load workspaces if we don't have them yet. Don't reuse fetchWorkspaces
+      // because it auto-selects the first workspace — we want the one
+      // matching currentTeam.workspaceId.
+      let workspaces = get().workspaces;
+      if (!workspaces?.length) {
+        const res = await api.get('/workspaces');
+        workspaces = res.data || [];
+        set({ workspaces });
+      }
+
+      const targetWs = currentTeam.workspaceId
+        ? workspaces.find((w) => String(w._id) === String(currentTeam.workspaceId))
+        : null;
+      const ws = targetWs || workspaces[0];
+      if (ws && get().activeWorkspace?._id !== ws._id) {
+        // Inline the "set active workspace" so we can await the team fetch.
+        set({ activeWorkspace: ws, activeChannel: null, messages: [], teams: [], teamChannels: {} });
+      } else if (!ws) {
+        return; // no workspaces — user must onboard
+      }
+
+      // Load teams for that workspace.
+      const teamsRes = await api.get(`/teams/${ws._id}`);
+      const teams = teamsRes.data || [];
+      set({ teams });
+
+      // Make the currentTeam active so URL-scoped pages resolve properly.
+      const activeT = teams.find((t) => String(t._id) === String(currentTeam.teamId));
+      if (activeT) {
+        set({ activeTeam: activeT });
+        // Load its channels (non-blocking — channels aren't required to render TeamDetails).
+        get().fetchTeamChannels(activeT._id);
+      }
+    } catch (err) {
+      console.error('bootstrapAppData:', err?.message || err);
     }
   },
 

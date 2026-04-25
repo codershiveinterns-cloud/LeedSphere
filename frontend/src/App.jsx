@@ -13,6 +13,8 @@ import CalendarView from './pages/CalendarView';
 import NotesPage from './pages/NotesPage';
 import AnalyticsDashboard from './pages/AnalyticsDashboard';
 import DashboardEmptyState from './pages/DashboardEmptyState';
+import TeamSelect from './pages/TeamSelect';
+import RequireTeam from './components/auth/RequireTeam';
 
 function App() {
   return (
@@ -22,8 +24,13 @@ function App() {
           <Route path="/" element={<Home />} />
           <Route path="/login" element={<Login />} />
           <Route path="/register" element={<Register />} />
-          <Route path="/dashboard" element={<Dashboard />}>
-            <Route index element={<DashboardEmptyState />} />
+          <Route path="/teams/select" element={<TeamSelect />} />
+          {/* Refresh-safety: RequireTeam bootstraps from localStorage, re-verifies
+              against the backend (GET /teams/:teamId/me), then either renders the
+              dashboard or routes to /teams/select. */}
+          <Route element={<RequireTeam />}>
+            <Route path="/dashboard" element={<Dashboard />}>
+              <Route index element={<DashboardEmptyState />} />
 
             <Route path="channel/:id" element={<ChatWindow />} />
             <Route path="dm/:id" element={<ChatWindow isDM={true} />} />
@@ -37,6 +44,7 @@ function App() {
             <Route path="projects" element={<ProjectKanban />} />
             <Route path="calendar" element={<CalendarView />} />
             <Route path="analytics" element={<AnalyticsDashboard />} />
+            </Route>
           </Route>
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>

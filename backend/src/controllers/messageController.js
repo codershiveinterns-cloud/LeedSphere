@@ -1,4 +1,29 @@
 import Message from '../models/Message.js';
+import Channel from '../models/Channel.js';
+import Team from '../models/Team.js';
+
+/**
+ * Authorization helper: returns true iff the caller can read messages from
+ * this channel.
+ *   - Caller must be a member of the channel's team.
+ *   - For private channels, caller must additionally be in channel.members.
+ *
+ * Used by every message read/write path. Centralized so future channel
+ * types only need to update this one function.
+ */
+const callerCanAccessChannel = async (channelId, userId) => {
+  if (!channelId || !userId) return false;
+  const channel = await Channel.findById(channelId).select('teamId isPrivate type members');
+  if (!channel) return false;
+  const team = await Team.findById(channel.teamId).select('members');
+  if (!team) return false;
+  const uid = String(userId);
+  const isTeamMember = (team.members || []).some((m) => String(m.userId) === uid);
+  if (!isTeamMember) return false;
+  const priv = channel.isPrivate || channel.type === 'private';
+  if (!priv) return true;
+  return (channel.members || []).some((id) => String(id) === uid);
+};
 
 // POST /api/messages
 export const sendMessage = async (req, res) => {
@@ -6,6 +31,10 @@ export const sendMessage = async (req, res) => {
     const { channelId, content, threadId } = req.body;
     if (!channelId || !content) {
       return res.status(400).json({ message: 'channelId and content are required' });
+    }
+
+    if (!(await callerCanAccessChannel(channelId, req.user._id))) {
+      return res.status(403).json({ message: 'Not authorized to post in this channel' });
     }
 
     const message = await Message.create({
@@ -32,6 +61,9 @@ export const sendMessage = async (req, res) => {
 // GET /api/messages/:channelId
 export const getMessagesByChannel = async (req, res) => {
   try {
+    if (!(await callerCanAccessChannel(req.params.channelId, req.user._id))) {
+      return res.status(403).json({ message: 'Not authorized to view this channel' });
+    }
     const filter = {
       $or: [
         { channelId: req.params.channelId },
@@ -52,10 +84,16 @@ export const getMessagesByChannel = async (req, res) => {
 // GET /api/messages/thread/:messageId
 export const getThreadReplies = async (req, res) => {
   try {
-    // Return parent message + replies
     const parent = await Message.findById(req.params.messageId)
       .populate('senderId', 'name avatar')
       .populate('reactions.userId', 'name');
+    if (!parent) return res.status(404).json({ message: 'Message not found' });
+
+    // Authorize via the parent message's channel.
+    if (!(await callerCanAccessChannel(parent.channelId, req.user._id))) {
+      return res.status(403).json({ message: 'Not authorized to view this thread' });
+    }
+
     const replies = await Message.find({ threadId: req.params.messageId })
       .sort({ createdAt: 1 })
       .populate('senderId', 'name avatar')

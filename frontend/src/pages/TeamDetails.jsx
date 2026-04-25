@@ -1,7 +1,8 @@
 import { useState, useEffect, useMemo } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { Users, Hash, Settings, Lock, UserMinus, Mail, Shield, ShieldCheck, Crown, Plus } from 'lucide-react';
+import { Users, Hash, Settings, Lock, UserMinus, Mail, Shield, ShieldCheck, Crown, Plus, Loader2 } from 'lucide-react';
 import useAppStore from '../store/useAppStore';
+import useCurrentTeamStore from '../store/useCurrentTeamStore';
 import Modal from '../components/common/Modal';
 import CreateChannelForm from '../components/channel/CreateChannelForm';
 import toast from 'react-hot-toast';
@@ -73,6 +74,22 @@ const TeamDetails = () => {
     const now = Date.now();
     return activity.map(a => ({ ...a, _rel: a.createdAt ? relativeTime(now - new Date(a.createdAt).getTime()) : '' }));
   }, [activity]);
+
+  // Disambiguate "still bootstrapping" from "genuinely not found". Only
+  // render the not-found screen after the app has loaded workspace + teams;
+  // otherwise show a loader to avoid a false flash on slow refreshes.
+  const appDataLoaded = useCurrentTeamStore((s) => s.appDataLoaded);
+
+  if (!resolvedTeam && !appDataLoaded) {
+    return (
+      <div className="flex-1 bg-[#f5f6f8] dark:bg-[#0d1117] flex items-center justify-center font-sans transition-colors duration-200">
+        <div className="flex flex-col items-center gap-3 text-slate-500 dark:text-gray-400">
+          <Loader2 size={20} className="animate-spin" />
+          <p className="text-sm">Loading team…</p>
+        </div>
+      </div>
+    );
+  }
 
   if (!resolvedTeam) {
     return (

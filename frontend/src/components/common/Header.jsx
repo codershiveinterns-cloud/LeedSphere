@@ -5,11 +5,12 @@ import useAuthStore from '../../store/useAuthStore';
 import useAppStore from '../../store/useAppStore';
 import useThemeStore from '../../store/useThemeStore';
 import useSearchStore from '../../store/useSearchStore';
+import useCurrentTeamStore from '../../store/useCurrentTeamStore';
 import Modal from './Modal';
 import CreateChannelForm from '../channel/CreateChannelForm';
 import toast from 'react-hot-toast';
 
-const Header = ({ simulatedRole, setSimulatedRole }) => {
+const Header = () => {
   const { user, logout } = useAuthStore();
   const {
     activeWorkspace, uiStates, setUiState,
@@ -18,6 +19,7 @@ const Header = ({ simulatedRole, setSimulatedRole }) => {
   } = useAppStore();
   const { theme, toggleTheme } = useThemeStore();
   const openSearch = useSearchStore((s) => s.open);
+  const { currentTeam } = useCurrentTeamStore();
   const navigate = useNavigate();
 
   const [activeNotifTab, setActiveNotifTab] = useState('All');
@@ -85,17 +87,36 @@ const Header = ({ simulatedRole, setSimulatedRole }) => {
   return (
     <>
       <header className="h-14 bg-white dark:bg-[#161b22] border-b border-slate-200 dark:border-gray-800 flex items-center justify-between px-6 shrink-0 shadow-sm z-20 transition-colors duration-200">
-        <div className="flex items-center gap-2">
-          <div className="w-8 h-8 rounded-lg bg-indigo-600 flex items-center justify-center font-bold text-white shadow-md shadow-indigo-500/20">L</div>
+        <div className="flex items-center gap-2 min-w-0">
+          <div className="w-8 h-8 rounded-lg bg-indigo-600 flex items-center justify-center font-bold text-white shadow-md shadow-indigo-500/20 shrink-0">L</div>
           <span className="font-bold text-xl text-slate-900 dark:text-white tracking-tight hidden sm:block">Leedsphere</span>
-          <span className="mx-4 text-slate-300 dark:text-gray-700 hidden sm:block">|</span>
-          <span className="text-sm font-medium text-slate-500 dark:text-gray-400">Role:</span>
-          <select value={simulatedRole} onChange={e => setSimulatedRole(e.target.value)}
-            className="ml-1 bg-slate-50 dark:bg-[#0d1117] border border-slate-200 dark:border-gray-700 rounded-md text-sm text-indigo-600 dark:text-indigo-400 px-2 py-1 outline-none font-semibold cursor-pointer max-w-[100px] truncate">
-            <option value="Admin">Admin</option>
-            <option value="Manager">Manager</option>
-            <option value="Member">Member</option>
-          </select>
+          {currentTeam ? (
+            <>
+              <span className="mx-3 text-slate-300 dark:text-gray-700 hidden sm:block">/</span>
+              <button
+                onClick={() => navigate('/teams/select')}
+                title="Switch team"
+                className="hidden sm:inline-flex items-center gap-2 px-2 py-1 rounded-md hover:bg-slate-100 dark:hover:bg-gray-800 transition-colors min-w-0"
+              >
+                <span className="text-sm font-semibold text-slate-800 dark:text-gray-200 truncate max-w-[140px]">
+                  {currentTeam.name || 'Team'}
+                </span>
+                <span
+                  className={`text-[10px] font-semibold uppercase px-1.5 py-0.5 rounded border ${
+                    currentTeam.role === 'admin'
+                      ? 'text-amber-700 bg-amber-50 border-amber-200 dark:text-amber-300 dark:bg-amber-500/10 dark:border-amber-500/30'
+                      : currentTeam.role === 'manager'
+                        ? 'text-indigo-700 bg-indigo-50 border-indigo-200 dark:text-indigo-300 dark:bg-indigo-500/10 dark:border-indigo-500/30'
+                        : 'text-slate-600 bg-slate-100 border-slate-200 dark:text-gray-300 dark:bg-gray-700/40 dark:border-gray-700'
+                  }`}
+                >
+                  {currentTeam.role}
+                </span>
+              </button>
+            </>
+          ) : (
+            <span className="hidden sm:block ml-3 text-xs text-slate-400 dark:text-gray-500">No team selected</span>
+          )}
         </div>
 
         {/* Global search trigger — opens Ctrl/Cmd+K modal */}
