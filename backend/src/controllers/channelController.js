@@ -4,12 +4,26 @@ import Activity from '../models/Activity.js';
 
 /* ---------- helpers ---------- */
 
-// Returns { isMember, role } for the given user in the team.
-// role is 'admin' | 'manager' | 'member' | null.
+/**
+ * Normalize an ObjectId-or-populated-Document reference to its hex id
+ * string. Mongoose populates a ref into a full document, so a naive
+ * `String(ref)` returns "[object Object]" instead of the id — which broke
+ * membership checks any time we populated `team.members.userId` for a
+ * response payload (caused 403 on /api/channels/:id/members).
+ */
+const idOf = (ref) => {
+  if (!ref) return '';
+  if (typeof ref === 'string') return ref;
+  if (ref._id) return String(ref._id);
+  return String(ref);
+};
+
+// Returns { isMember, role } for the given user in the team. Works whether
+// `team.members.userId` is a raw ObjectId or a populated User document.
 const getTeamMembership = (team, userId) => {
   if (!team?.members) return { isMember: false, role: null };
   const uid = String(userId);
-  const m = team.members.find((mem) => String(mem.userId) === uid);
+  const m = team.members.find((mem) => idOf(mem.userId) === uid);
   return m ? { isMember: true, role: m.role } : { isMember: false, role: null };
 };
 
@@ -20,12 +34,12 @@ const canAccessChannel = (channel, team, userId) => {
   const { isMember } = getTeamMembership(team, userId);
   if (!isMember) return false;
   if (!channel.isPrivate && channel.type !== 'private') return true;
-  return (channel.members || []).some((id) => String(id) === String(userId));
+  return (channel.members || []).some((m) => idOf(m) === String(userId));
 };
 
 const sanitizePrivateMembers = (memberIds, team) => {
   if (!Array.isArray(memberIds)) return [];
-  const teamUserIds = new Set((team.members || []).map((m) => String(m.userId)));
+  const teamUserIds = new Set((team.members || []).map((m) => idOf(m.userId)));
   const unique = [...new Set(memberIds.map(String))].filter((id) => teamUserIds.has(id));
   return unique;
 };

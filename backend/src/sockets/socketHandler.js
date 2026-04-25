@@ -19,8 +19,46 @@ export const handleSockets = (io) => {
   });
 
   io.on('connection', (socket) => {
-    const userName = socket.user?.name || 'Anonymous';
-    const userId = socket.user?._id;
+    // Snapshot at connection time. Most handlers use these directly; the
+    // lazy `callerInfo()` below recovers from a missed handshake auth.
+    let userName = socket.user?.name || 'Anonymous';
+    let userId = socket.user?._id;
+
+    /**
+     * Lazy identity resolver. Reading `socket.user` directly on every event
+     * (instead of relying on the connection-time snapshot) means a token
+     * that arrived late, was rotated, or failed initial verification can
+     * still be picked up by re-running JWT verify on the handshake auth.
+     *
+     * Closure capture was the root cause of "Anonymous" senders and
+     * "Not authenticated" call errors persisting across an entire
+     * connection even after the user was clearly signed in.
+     */
+    const callerInfo = async () => {
+      if (!socket.user) {
+        const token = socket.handshake.auth?.token || socket.handshake.query?.token;
+        if (token) {
+          try {
+            const decoded = jwt.verify(token, process.env.JWT_SECRET);
+            const u = await User.findById(decoded.id).select('-password');
+            if (u) {
+              socket.user = u;
+              // Refresh the connection-scope vars so handlers that
+              // captured them (edit/delete/reaction) see the right values too.
+              userId = u._id;
+              userName = u.name || 'Anonymous';
+              socket.join(`user_${u._id}`);
+            }
+          } catch (err) {
+            console.warn('[socket] re-auth failed:', err.message);
+          }
+        }
+      }
+      return {
+        userId: socket.user?._id || null,
+        userName: socket.user?.name || 'Anonymous',
+      };
+    };
 
     // Auto-join user's personal room for DM notifications
     if (userId) socket.join(`user_${userId}`);
@@ -42,6 +80,10 @@ export const handleSockets = (io) => {
       try {
         const { channelId, content, threadId } = data;
         if (!channelId || !content) return;
+
+        // Resolve identity at emit time so a late/rotated token still
+        // attributes the message to the right user (instead of "Anonymous").
+        const { userId, userName } = await callerInfo();
 
         const newMessage = await Message.create({
           channelId,

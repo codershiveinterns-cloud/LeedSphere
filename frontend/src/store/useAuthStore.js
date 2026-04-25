@@ -2,6 +2,7 @@ import { create } from 'zustand';
 import api from '../services/api';
 import useCurrentTeamStore from './useCurrentTeamStore';
 import useAppStore from './useAppStore';
+import { reconnectSocket, disconnectSocket } from '../hooks/useSocket';
 
 /**
  * We do NOT store a role on `user`. Roles are per-team and live on
@@ -37,6 +38,12 @@ const useAuthStore = create((set) => ({
       set({ user, isAuthenticated: true, isLoading: false });
       localStorage.setItem('user', JSON.stringify(user));
 
+      // Force the websocket to re-handshake with the new token. Without
+      // this, the socket is still authenticated as the previous session
+      // (or as no one), which is why messages save as "Anonymous" and
+      // call:join responds with "Not authenticated".
+      reconnectSocket();
+
       // Immediately fetch teams so the caller can decide routing.
       let memberships = [];
       try {
@@ -55,10 +62,19 @@ const useAuthStore = create((set) => ({
   register: async (name, email, password) => {
     set({ isLoading: true, error: null });
     try {
+      // Same defensive cleanup as login — never inherit a previous session's state.
+      useAppStore.getState().reset();
+      useCurrentTeamStore.getState().clear();
+
       const res = await api.post('/auth/register', { name, email, password });
       const user = res.data;
       set({ user, isAuthenticated: true, isLoading: false });
       localStorage.setItem('user', JSON.stringify(user));
+
+      // Re-handshake the socket so the server attaches socket.user for the
+      // newly-registered account.
+      reconnectSocket();
+
       // A freshly-registered user has no teams yet. Returning an empty list
       // signals the caller to send them to onboarding.
       return { user, memberships: [] };
@@ -79,6 +95,10 @@ const useAuthStore = create((set) => ({
     // user's workspaces/teams from in-memory state.
     useCurrentTeamStore.getState().clear();
     useAppStore.getState().reset();
+    // Tear down the socket so the server cleans up the previous user's
+    // room memberships (channels they had joined, active call rooms).
+    // Next login will reconnect with a fresh handshake.
+    disconnectSocket();
   },
 }));
 

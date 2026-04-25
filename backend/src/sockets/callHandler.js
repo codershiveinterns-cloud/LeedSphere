@@ -26,8 +26,10 @@
  *   call:error          { message }
  */
 
+import jwt from 'jsonwebtoken';
 import Channel from '../models/Channel.js';
 import Team from '../models/Team.js';
+import User from '../models/User.js';
 
 // Module-level in-memory state. Keyed by channelId.
 // callRooms: Map<channelId, Map<socketId, { userId, name, avatar }>>
@@ -65,20 +67,51 @@ const canAccessChannel = async (channel, userId) => {
 };
 
 export const registerCallHandlers = (io, socket) => {
-  const userId = socket.user?._id ? String(socket.user._id) : null;
-  const name = socket.user?.name || 'Anonymous';
-  const avatar = socket.user?.avatar || '';
-
   // Track which rooms this socket is in so we can clean up on disconnect.
   const joinedChannels = new Set();
 
   const emitError = (message) => socket.emit('call:error', { message });
 
+  /**
+   * Resolve the caller's identity at EVENT TIME, not at connection time.
+   *
+   * The previous version captured `socket.user` once when the connection
+   * handler ran — if the io.use middleware silently failed to verify the
+   * JWT (expired token, race during page-load, etc.), `socket.user` was
+   * never populated and every subsequent `call:join` emitted
+   * "Not authenticated" for the lifetime of the connection.
+   *
+   * Reading the auth token from `socket.handshake.auth` per event lets us
+   * recover from a bad initial handshake without forcing the client to
+   * reconnect. Successful re-auth caches the user back onto the socket
+   * so future events skip the JWT verify.
+   */
+  const resolveCaller = async () => {
+    if (socket.user) return socket.user;
+    const token = socket.handshake.auth?.token || socket.handshake.query?.token;
+    if (!token) return null;
+    try {
+      const decoded = jwt.verify(token, process.env.JWT_SECRET);
+      const user = await User.findById(decoded.id).select('-password');
+      if (user) {
+        socket.user = user;
+        return user;
+      }
+    } catch (err) {
+      console.warn('[call] socket re-auth failed:', err.message);
+    }
+    return null;
+  };
+
   // -------- Join --------
   socket.on('call:join', async ({ channelId } = {}) => {
     try {
       if (!channelId) return emitError('channelId required');
-      if (!userId) return emitError('Not authenticated');
+      const user = await resolveCaller();
+      if (!user) return emitError('Not authenticated');
+      const userId = String(user._id);
+      const name = user.name || 'Guest';
+      const avatar = user.avatar || '';
 
       const channel = await Channel.findById(channelId);
       if (!channel) return emitError('Channel not found');
@@ -144,13 +177,27 @@ export const registerCallHandlers = (io, socket) => {
   });
 
   // -------- Signaling relays --------
+  // Look up the caller's identity from any room the socket has joined.
+  // Falls back to socket.user (which may be set after re-auth) so the peer
+  // tile renders something sensible even if room metadata is missing.
+  const callerMeta = () => {
+    for (const room of callRooms.values()) {
+      const meta = room.get(socket.id);
+      if (meta) return meta;
+    }
+    return socket.user
+      ? { userId: String(socket.user._id), name: socket.user.name || 'Guest', avatar: socket.user.avatar || '' }
+      : { userId: null, name: 'Guest', avatar: '' };
+  };
+
   socket.on('call:offer', ({ toSocketId, offer } = {}) => {
     if (!toSocketId || !offer) return;
+    const me = callerMeta();
     io.to(toSocketId).emit('call:offer', {
       fromSocketId: socket.id,
-      fromUserId: userId,
-      fromName: name,
-      fromAvatar: avatar,
+      fromUserId: me.userId,
+      fromName: me.name,
+      fromAvatar: me.avatar,
       offer,
     });
   });
