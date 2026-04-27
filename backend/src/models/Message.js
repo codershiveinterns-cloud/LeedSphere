@@ -14,6 +14,12 @@ const messageSchema = new mongoose.Schema({
   reactions: [reactionSchema],
   replyCount: { type: Number, default: 0 },
   attachments: [{ type: String }],
+  // Edit tracking. `isEdited` + `editedAt` are the canonical pair the
+  // frontend reads ("(edited)" label, edit-time tooltip). `edited` is kept
+  // for backward compatibility with older docs / clients — both flip
+  // together so neither side gets out of sync.
+  isEdited: { type: Boolean, default: false },
+  editedAt: { type: Date },
   edited: { type: Boolean, default: false },
   conversationId: { type: mongoose.Schema.Types.ObjectId, ref: 'Channel' },
 }, { timestamps: true });

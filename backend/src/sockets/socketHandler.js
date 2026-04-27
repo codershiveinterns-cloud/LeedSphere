@@ -79,14 +79,23 @@ export const handleSockets = (io) => {
         if (!channelId || !content) return;
 
         // Resolve identity at emit time so a late/rotated token still
-        // attributes the message to the right user (instead of "Anonymous").
+        // attributes the message to the right user.
         const { userId, userName } = await callerInfo();
+
+        // HARD REJECT unauthenticated emits. Previously we fell back to
+        // senderName='Anonymous' which polluted chat history with messages
+        // that couldn't be edited / deleted by the actual sender. Better to
+        // refuse the write and surface an auth_error to the client.
+        if (!userId) {
+          socket.emit('auth_error', { event: 'send_message', message: 'Not authenticated; please reconnect.' });
+          return;
+        }
 
         const newMessage = await Message.create({
           channelId,
           conversationId: channelId,
-          senderId: userId || null,
-          senderName: userName,
+          senderId: userId,
+          senderName: userName, // real name, not "Anonymous"
           content,
           threadId: threadId || null,
         });
@@ -117,11 +126,26 @@ export const handleSockets = (io) => {
     socket.on('edit_message', async (data) => {
       try {
         const { messageId, content } = data;
+        if (!messageId || !content || !content.trim()) return;
+
+        // Re-resolve at emit time so a late-arrived token is honored.
+        const { userId: callerId } = await callerInfo();
+        if (!callerId) {
+          socket.emit('auth_error', { event: 'edit_message', message: 'Not authenticated.' });
+          return;
+        }
+
         const message = await Message.findById(messageId);
-        if (!message || (userId && message.senderId?.toString() !== userId.toString())) return;
+        if (!message) return;
+        if (!message.senderId || message.senderId.toString() !== callerId.toString()) {
+          socket.emit('edit_denied', { messageId, reason: 'You can only edit your own messages' });
+          return;
+        }
 
         message.content = content;
-        message.edited = true;
+        message.isEdited = true;
+        message.editedAt = new Date();
+        message.edited = true; // legacy alias
         await message.save();
 
         const populated = await Message.findById(messageId).populate('senderId', 'name avatar').populate('reactions.userId', 'name');

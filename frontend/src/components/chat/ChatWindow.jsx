@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useOutletContext, useParams } from 'react-router-dom';
 import { Hash, Info, Lock, Users } from 'lucide-react';
 import useAppStore from '../../store/useAppStore';
-import useAuthStore from '../../store/useAuthStore';
+import useFirebaseAuthStore from '../../store/useFirebaseAuthStore';
 import MessageItem from './MessageItem';
 import MessageInput from './MessageInput';
 import ChannelInfoModal from '../channel/ChannelInfoModal';
@@ -12,7 +12,9 @@ import { useSocket, socket } from '../../hooks/useSocket';
 const ChatWindow = () => {
   const { id } = useParams();
   const { activeChannel, messages, setActiveChannel, findChannelById, openThread } = useAppStore();
-  const { user } = useAuthStore();
+  // Mongo profile is the source of truth for "is this my message" — Firebase
+  // uid and Mongo _id are different namespaces.
+  const profile = useFirebaseAuthStore((s) => s.profile);
   const outletContext = useOutletContext();
   const toggleRightPanel = outletContext?.toggleRightPanel || (() => {});
   const messagesEndRef = useRef(null);
@@ -42,12 +44,16 @@ const ChatWindow = () => {
     if (!activeChannel?._id) return;
     socket.emit('join_channel', activeChannel._id);
 
+    // Suppress typing indicators for our own keystrokes — match against the
+    // Mongo profile name we cached after Firebase auth landed.
+    const myName = profile?.name;
+
     const handleTyping = ({ senderName }) => {
-      if (senderName === user?.name) return;
+      if (senderName === myName) return;
       setTypingUsers(prev => { const n = new Set(prev); n.add(senderName); return n; });
     };
     const handleStopTyping = ({ senderName }) => {
-      if (senderName === user?.name) return;
+      if (senderName === myName) return;
       setTypingUsers(prev => { const n = new Set(prev); n.delete(senderName); return n; });
     };
 
@@ -59,7 +65,7 @@ const ChatWindow = () => {
       socket.off('user_stop_typing', handleStopTyping);
       setTypingUsers(new Set());
     };
-  }, [activeChannel?._id, user?.name]);
+  }, [activeChannel?._id, profile?.name]);
 
   const handleSendMessage = (content) => {
     if (!activeChannel?._id) return;
@@ -141,7 +147,12 @@ const ChatWindow = () => {
               <p className="text-slate-500 dark:text-gray-400">This is the beginning of your chat history.</p>
             </div>
             {messages.map((msg, idx) => {
-              const isMe = msg.senderName === user?.name;
+              // Compare by Mongo _id (always reliable). Fall back to senderName
+              // only if the populated senderId is missing for some reason.
+              const senderMongoId = msg.senderId?._id || msg.senderId;
+              const isMe = profile?._id
+                ? String(senderMongoId) === String(profile._id)
+                : false;
               const prevMsg = idx > 0 ? messages[idx - 1] : null;
               const aTs = msg.createdAt ? new Date(msg.createdAt).getTime() : 0;
               const bTs = prevMsg?.createdAt ? new Date(prevMsg.createdAt).getTime() : 0;

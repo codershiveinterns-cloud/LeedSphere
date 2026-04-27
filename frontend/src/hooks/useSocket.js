@@ -68,6 +68,46 @@ export const disconnectSocket = () => {
   if (socket.connected) socket.disconnect();
 };
 
+/**
+ * Re-handshake the socket every time Firebase auth lands a different user.
+ *
+ * Without this, the socket connects ONCE at module-load time and the
+ * handshake ships whatever token was available then — usually an empty
+ * string because Firebase hasn't rehydrated yet. The backend's lazy
+ * re-auth in `callerInfo()` only triggers when a token IS present, so an
+ * empty handshake leaves the socket permanently unauthenticated and every
+ * `send_message` is silently rejected.
+ *
+ * On every uid change (login, account switch, logout) we force-reconnect
+ * so the handshake function re-runs with a fresh getIdToken().
+ */
+let lastUid = null;
+onAuthStateChanged(auth, (user) => {
+  const nextUid = user?.uid || null;
+  if (nextUid === lastUid) return;
+  lastUid = nextUid;
+  console.info('[socket] auth changed → reconnecting with fresh token', { uid: nextUid });
+  reconnectSocket();
+});
+
+// Surface auth rejections so a stuck "messages not sending" state is one
+// console line away from a diagnosis instead of total silence.
+let lastAuthErrorReconnectAt = 0;
+socket.on('auth_error', (info) => {
+  console.warn('[socket] auth_error from server:', info);
+  // Auto-recover: the most common cause is a stale token. Force-reconnect
+  // so the handshake reruns with a freshly minted ID token. Debounce hard:
+  // if reconnects keep failing we'd otherwise loop forever.
+  const now = Date.now();
+  if (now - lastAuthErrorReconnectAt < 5000) return;
+  lastAuthErrorReconnectAt = now;
+  reconnectSocket();
+});
+
+socket.on('connect_error', (err) => {
+  console.warn('[socket] connect_error:', err?.message || err);
+});
+
 export const useSocket = () => {
   const { addMessage, updateMessage, removeMessage, addThreadReply, addDmMessage } = useAppStore();
 

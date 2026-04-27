@@ -105,16 +105,25 @@ export const getThreadReplies = async (req, res) => {
 };
 
 // PUT /api/messages/:id
+// Caller must be the original sender; controller-level check (channel-level
+// auth is implied by sender ownership — only members can have sent the msg).
 export const editMessage = async (req, res) => {
   try {
+    const { content } = req.body;
+    if (!content || !content.trim()) {
+      return res.status(400).json({ message: 'content is required' });
+    }
+
     const message = await Message.findById(req.params.id);
     if (!message) return res.status(404).json({ message: 'Message not found' });
-    if (message.senderId && message.senderId.toString() !== req.user._id.toString()) {
+    if (!message.senderId || message.senderId.toString() !== req.user._id.toString()) {
       return res.status(403).json({ message: 'You can only edit your own messages' });
     }
 
-    message.content = req.body.content || message.content;
-    message.edited = true;
+    message.content = content;
+    message.isEdited = true;
+    message.editedAt = new Date();
+    message.edited = true; // legacy alias kept in sync
     await message.save();
 
     const populated = await Message.findById(message._id)

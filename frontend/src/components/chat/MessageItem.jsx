@@ -1,12 +1,14 @@
 import { useState, useRef, useEffect } from 'react';
 import { MessageSquare, Edit2, Trash2, Smile, Check, X } from 'lucide-react';
 import { socket } from '../../hooks/useSocket';
-import useAuthStore from '../../store/useAuthStore';
+import useFirebaseAuthStore from '../../store/useFirebaseAuthStore';
 
 const QUICK_EMOJIS = ['👍', '❤️', '😂', '🎉', '🔥', '👀'];
 
 const MessageItem = ({ message, isSequential, isMe, onOpenThread }) => {
-  const { user } = useAuthStore();
+  // Mongo profile of the signed-in user. Used for the reaction-mine check
+  // below. `isMe` is computed by ChatWindow against the same source.
+  const profile = useFirebaseAuthStore((s) => s.profile);
   const createdAt = message.createdAt ? new Date(message.createdAt) : null;
   const time = createdAt
     ? createdAt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
@@ -64,7 +66,12 @@ const MessageItem = ({ message, isSequential, isMe, onOpenThread }) => {
     groupedReactions[r.emoji].push(r.userId?.name || r.userId);
   });
 
-  const myUserId = user?._id;
+  const myUserId = profile?._id;
+  // Display name: prefer the populated sender ref (always up-to-date), fall
+  // back to the snapshot-on-send `senderName`. Never render "Anonymous" — if
+  // both are missing, hide the field entirely so the bug is visible.
+  const displayName = message.senderId?.name || message.senderName || '';
+  const isEdited = message.isEdited || message.edited;
 
   return (
     <div className={`relative flex gap-4 group px-6 py-1 hover:bg-slate-100/60 dark:hover:bg-[#1c212b]/50 transition-colors ${!isSequential ? 'mt-4' : ''}`}>
@@ -75,7 +82,7 @@ const MessageItem = ({ message, isSequential, isMe, onOpenThread }) => {
             {message.senderId?.avatar ? (
               <img src={message.senderId.avatar} className="w-full h-full rounded-xl object-cover" alt="" />
             ) : (
-              message.senderName?.charAt(0).toUpperCase() || '?'
+              displayName.charAt(0).toUpperCase() || '?'
             )}
           </div>
         ) : (
@@ -87,9 +94,9 @@ const MessageItem = ({ message, isSequential, isMe, onOpenThread }) => {
       <div className="flex flex-col flex-1 min-w-0 justify-center">
         {!isSequential && (
           <div className="flex items-baseline gap-2 mb-0.5">
-            <span className={`font-semibold ${isMe ? 'text-indigo-600 dark:text-indigo-400' : 'text-slate-800 dark:text-gray-200'}`}>{message.senderName}</span>
+            <span className={`font-semibold ${isMe ? 'text-indigo-600 dark:text-indigo-400' : 'text-slate-800 dark:text-gray-200'}`}>{displayName}</span>
             <span className="text-xs text-slate-500 dark:text-gray-500 font-medium">{time}</span>
-            {message.edited && <span className="text-[10px] text-slate-400 dark:text-gray-600">(edited)</span>}
+            {isEdited && <span className="text-[10px] text-slate-400 dark:text-gray-600">(edited)</span>}
           </div>
         )}
 
@@ -112,7 +119,7 @@ const MessageItem = ({ message, isSequential, isMe, onOpenThread }) => {
         ) : (
           <>
             <div className="text-slate-700 dark:text-gray-300 leading-relaxed font-normal whitespace-pre-wrap">{message.content}</div>
-            {isSequential && message.edited && <span className="text-[10px] text-slate-400 dark:text-gray-600">(edited)</span>}
+            {isSequential && isEdited && <span className="text-[10px] text-slate-400 dark:text-gray-600">(edited)</span>}
           </>
         )}
 
