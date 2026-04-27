@@ -11,7 +11,8 @@ const TeamView = () => {
     teams, createTeam, setActiveTeam, activeTeam, deleteTeam, mergeTeams,
     getTeamMembers, getTeamChannels,
   } = useAppStore();
-  const myRole = useCurrentTeamStore((s) => s.currentTeam?.role) || 'member';
+  const currentTeamRole = useCurrentTeamStore((s) => s.currentTeam?.role) || null;
+  const myWorkspaceRole = activeWorkspace?.myRole || currentTeamRole || 'member';
   const navigate = useNavigate();
   const [newTeamName, setNewTeamName] = useState('');
   const [mergeSource, setMergeSource] = useState('');
@@ -20,7 +21,9 @@ const TeamView = () => {
 
   const handleCreateTeam = async (e) => {
     e.preventDefault();
-    if (myRole === 'member') return toast.error('Only Admins/Managers can create teams.');
+    if (!['admin', 'manager'].includes(myWorkspaceRole)) {
+      return toast.error('Only Admins/Managers can create teams.');
+    }
     if (!newTeamName.trim() || !activeWorkspace) return;
     setCreating(true);
     try {
@@ -38,7 +41,7 @@ const TeamView = () => {
 
   const handleDeleteTeam = async (e, teamId, teamName) => {
     e.stopPropagation();
-    if (myRole !== 'admin') return toast.error('Only Admins can delete teams.');
+    if (myWorkspaceRole !== 'admin') return toast.error('Only Admins can delete teams.');
     try {
       await deleteTeam(teamId);
       toast.success(`"${teamName}" deleted`);
@@ -49,7 +52,7 @@ const TeamView = () => {
   };
 
   const handleMerge = async () => {
-    if (myRole !== 'admin') return toast.error('Only Admins can merge teams.');
+    if (myWorkspaceRole !== 'admin') return toast.error('Only Admins can merge teams.');
     if (!mergeSource || !mergeTarget || mergeSource === mergeTarget) return toast.error('Select two distinct teams');
     try {
       await mergeTeams(mergeTarget, mergeSource);
@@ -138,7 +141,7 @@ const TeamView = () => {
 
                 <div className="absolute top-4 right-4 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity z-10 bg-white/95 dark:bg-[#161b22]/90 backdrop-blur rounded-lg shadow-lg border border-slate-200 dark:border-gray-700 p-1">
                   <button onClick={(e) => { e.stopPropagation(); setActiveTeam(team); navigate(`/dashboard/team/${team._id}`); }} className="p-1.5 text-slate-500 dark:text-gray-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-gray-800 rounded-md transition-colors active:scale-90" title="Open"><ExternalLink size={16} /></button>
-                  {myRole === 'admin' && (
+                  {myWorkspaceRole === 'admin' && (
                     <>
                       <div className="w-px h-4 bg-slate-200 dark:bg-gray-700 my-auto mx-1"></div>
                       <button onClick={(e) => handleDeleteTeam(e, team._id, team.name)} className="p-1.5 text-red-500/80 dark:text-red-500/70 hover:text-red-600 dark:hover:text-red-400 hover:bg-red-50 dark:hover:bg-red-500/10 rounded-md transition-colors active:scale-90" title="Delete"><Trash2 size={16} /></button>

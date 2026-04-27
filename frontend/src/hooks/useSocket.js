@@ -1,47 +1,69 @@
 import { useEffect } from 'react';
 import { io } from 'socket.io-client';
+import { onAuthStateChanged } from 'firebase/auth';
+import { auth } from '../firebase';
 import useAppStore from '../store/useAppStore';
 
-/**
- * Read the JWT from localStorage. Called every time the socket initiates a
- * handshake (see the `auth` function below) so a fresh login is picked up
- * on the next (re)connect — without this, the token is captured once at
- * module load and the server marks subsequent messages/calls as
- * "Anonymous" because socket.user is never populated for the new user.
- */
-const getToken = () => {
-  try {
-    const stored = localStorage.getItem('user');
-    if (stored) return JSON.parse(stored)?.token || '';
-  } catch { /* ignore bad stored data */ }
-  return '';
+const waitForFirebaseUser = async (timeoutMs = 3000) => {
+  if (auth.currentUser) return auth.currentUser;
+
+  if (typeof auth.authStateReady === 'function') {
+    try {
+      await Promise.race([
+        auth.authStateReady(),
+        new Promise((resolve) => setTimeout(resolve, timeoutMs)),
+      ]);
+    } catch {
+      // Fall through.
+    }
+    if (auth.currentUser) return auth.currentUser;
+  }
+
+  return new Promise((resolve) => {
+    let settled = false;
+    let unsubscribe = null;
+
+    const finish = (user) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      if (unsubscribe) unsubscribe();
+      resolve(user || null);
+    };
+
+    const timer = setTimeout(() => finish(auth.currentUser || null), timeoutMs);
+    unsubscribe = onAuthStateChanged(
+      auth,
+      (user) => finish(user),
+      () => finish(null),
+    );
+  });
 };
 
-/**
- * `auth` accepts either an object (captured once) or a callback function
- * (invoked on every handshake). We use the function form so the latest
- * token in localStorage flows in on every reconnect.
- */
+const getSocketToken = async () => {
+  const user = auth.currentUser || await waitForFirebaseUser();
+  if (!user) return '';
+
+  try {
+    const token = await user.getIdToken();
+    console.debug('[socket] Firebase token ready', { tokenPreview: `${token.slice(0, 12)}...` });
+    return token;
+  } catch (err) {
+    console.warn('[socket] getIdToken failed:', err?.message || err);
+    return '';
+  }
+};
+
 export const socket = io('http://localhost:5005', {
-  auth: (cb) => cb({ token: getToken() }),
+  auth: async (cb) => cb({ token: await getSocketToken() }),
   autoConnect: true,
 });
 
-/**
- * Force a fresh handshake. Call this after login / token rotation so the
- * server can re-authenticate the socket and attach `socket.user`. Without
- * this, messages keep getting attributed to "Anonymous" and call signaling
- * rejects with "Not authenticated".
- */
 export const reconnectSocket = () => {
   if (socket.connected) socket.disconnect();
   socket.connect();
 };
 
-/**
- * Disconnect the socket — used on logout so the server tears down room
- * memberships (active calls, channel rooms) for the previous user.
- */
 export const disconnectSocket = () => {
   if (socket.connected) socket.disconnect();
 };

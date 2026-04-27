@@ -1,12 +1,12 @@
 import User from '../models/User.js';
 import generateToken from '../utils/generateToken.js';
 import { findUserTeams } from '../services/teamMember.js';
+import { ensureDefaultWorkspaceForUser } from '../services/workspaceMember.js';
 
 /**
- * IMPORTANT: We intentionally do NOT include a `role` field in the login /
- * register response. Team roles live on TeamMember (Team.members[]) and are
- * looked up per-team via GET /api/auth/me/teams. The old `User.role` column
- * was a legacy field and must never drive UI role gating.
+ * IMPORTANT: We intentionally do NOT include a `role` field in login/register
+ * responses. Authorization is membership-based (team/workspace membership
+ * roles), not User.role.
  */
 const toAuthPayload = (user, token) => ({
   _id: user._id,
@@ -30,8 +30,8 @@ export const register = async (req, res) => {
       return res.status(400).json({ message: 'User already exists with this email' });
     }
 
-    // Don't accept a role from the client — roles are per-team and assigned via TeamMember.
     const user = await User.create({ name, email, password });
+    await ensureDefaultWorkspaceForUser(user, { workspaceName: `${name.trim()}'s Workspace` });
 
     const token = generateToken(user._id);
     res.status(201).json(toAuthPayload(user, token));
@@ -59,6 +59,8 @@ export const login = async (req, res) => {
       return res.status(401).json({ message: 'Invalid email or password' });
     }
 
+    await ensureDefaultWorkspaceForUser(user, { workspaceName: `${user.name || 'My'} Workspace` });
+
     const token = generateToken(user._id);
     res.json(toAuthPayload(user, token));
   } catch (error) {
@@ -80,11 +82,6 @@ export const getMe = async (req, res) => {
 };
 
 // GET /api/auth/me/teams
-// Returns the TeamMember records (+ teams) for the logged-in user.
-// The frontend calls this immediately after login to decide onboarding:
-//   0 teams → create-team screen
-//   1 team  → auto-select, go to dashboard
-//   N teams → team picker
 export const getMyTeams = async (req, res) => {
   try {
     const memberships = await findUserTeams(req.user._id);

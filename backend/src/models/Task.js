@@ -6,6 +6,9 @@ const taskSchema = new mongoose.Schema({
   description: { type: String, default: '' },
   status: { type: String, enum: ['Todo', 'In Progress', 'In Review', 'Done'], default: 'Todo' },
   priority: { type: String, enum: ['low', 'medium', 'high'], default: 'medium' },
+  // Multi-assignee support. `assignees` is canonical; `assignedTo` retained
+  // for backward compatibility with existing rows and any older clients.
+  assignees: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }],
   assignedTo: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
   assignee: { type: String, default: '' },
   dueDate: { type: Date, default: null },

@@ -2,34 +2,22 @@ import Workspace from '../models/Workspace.js';
 import Team from '../models/Team.js';
 import Channel from '../models/Channel.js';
 import Project from '../models/Project.js';
+import Event from '../models/Event.js';
+import Note from '../models/Note.js';
 import PDFDocument from 'pdfkit';
+import {
+  ensureWorkspaceMember as ensureWorkspaceMemberRecord,
+  ensureDefaultWorkspaceForUser,
+  maxWorkspaceRole,
+  normalizeWorkspaceRole,
+} from '../services/workspaceMember.js';
 
 /**
- * Helper: ensure a user is in workspace.members. Idempotent. Used from:
- *   - workspace creation (creator → admin)
- *   - team creation in someone's workspace (creator → member)
- *   - invite acceptance (invitee → member)
- *
- * Exported so other controllers can call it without duplicating logic.
+ * Backward-compatible export used by other controllers.
  */
-export const ensureWorkspaceMember = async (workspaceId, userId, role = 'member') => {
-  if (!workspaceId || !userId) return null;
-  const ws = await Workspace.findById(workspaceId);
-  if (!ws) return null;
-  const uid = String(userId);
-  const existing = (ws.members || []).find((m) => String(m.userId) === uid);
-  if (existing) {
-    // Promote silently if a higher role is requested.
-    if (role === 'admin' && existing.role !== 'admin') {
-      existing.role = 'admin';
-      await ws.save();
-    }
-    return ws;
-  }
-  ws.members.push({ userId, role });
-  await ws.save();
-  return ws;
-};
+export const ensureWorkspaceMember = async (workspaceId, userId, role = 'member') => (
+  ensureWorkspaceMemberRecord(workspaceId, userId, role)
+);
 
 // POST /api/workspaces
 export const createWorkspace = async (req, res) => {
@@ -47,47 +35,86 @@ export const createWorkspace = async (req, res) => {
     const workspace = await Workspace.create({
       name: name.trim(),
       createdBy: req.user._id,
-      // Seed members[] with the creator as admin so access checks work
-      // without falling back to createdBy comparisons.
       members: [{ userId: req.user._id, role: 'admin' }],
     });
-    res.status(201).json(workspace);
+
+    res.status(201).json({
+      ...workspace.toObject(),
+      myRole: 'admin',
+    });
   } catch (error) {
     res.status(500).json({ message: error.message });
   }
 };
 
-// GET /api/workspaces
-// Returns workspaces the caller has access to: where they're a member, OR
-// (legacy) where they're the creator without a populated members array yet.
-// Performs a one-time backfill: any legacy workspace owned by the caller
-// gets its creator added to members[] on first read so future filters can
-// rely on a single source of truth.
-export const getWorkspaces = async (req, res) => {
+// GET /api/workspaces OR /api/my-workspaces
+export const getMyWorkspaces = async (req, res) => {
   try {
     const me = req.user._id;
+    const roleRank = { member: 1, manager: 2, admin: 3 };
 
-    // Legacy backfill — promote createdBy into members[] for this user's
-    // own workspaces so future queries match by membership only.
-    await Workspace.updateMany(
-      { createdBy: me, 'members.userId': { $ne: me } },
-      { $push: { members: { userId: me, role: 'admin' } } },
-    );
+    // Legacy creator-only rows: ensure createdBy is also a membership row.
+    const createdWorkspaceIds = await Workspace.find({ createdBy: me }).distinct('_id');
+    await Promise.all(createdWorkspaceIds.map((id) => ensureWorkspaceMemberRecord(id, me, 'admin')));
 
-    // Workspaces visible via team membership (covers users who joined
-    // someone else's workspace through a team invite before we tracked
-    // workspace.members directly).
-    const teamWorkspaceIds = await Team.find({ 'members.userId': me }).distinct('workspaceId');
-    // Backfill those too — opportunistic, idempotent.
-    if (teamWorkspaceIds.length) {
-      await Workspace.updateMany(
-        { _id: { $in: teamWorkspaceIds }, 'members.userId': { $ne: me } },
-        { $push: { members: { userId: me, role: 'member' } } },
+    // Team memberships should always imply workspace membership.
+    const teams = await Team.find({ 'members.userId': me }).select('workspaceId members');
+    const impliedWorkspaceRoles = new Map();
+    for (const team of teams) {
+      const membership = (team.members || []).find((m) => String(m.userId) === String(me));
+      if (!membership) continue;
+      const wsid = String(team.workspaceId);
+      const incoming = ['admin', 'manager', 'member'].includes(membership.role) ? membership.role : 'member';
+      const current = impliedWorkspaceRoles.get(wsid) || 'member';
+      impliedWorkspaceRoles.set(
+        wsid,
+        (roleRank[incoming] || 1) > (roleRank[current] || 1) ? incoming : current,
       );
     }
+    await Promise.all(
+      Array.from(impliedWorkspaceRoles.entries()).map(([workspaceId, role]) => (
+        ensureWorkspaceMemberRecord(workspaceId, me, role)
+      )),
+    );
 
-    const workspaces = await Workspace.find({ 'members.userId': me }).sort({ createdAt: 1 });
-    res.status(200).json(workspaces);
+    // Guarantee there are no orphan users without a workspace membership.
+    await ensureDefaultWorkspaceForUser(req.user);
+
+    const workspaces = await Workspace.find({ 'members.userId': me }).sort({ createdAt: 1 }).lean();
+    const withMyRole = workspaces.map((workspace) => {
+      const mine = (workspace.members || []).filter((m) => String(m.userId) === String(me));
+      const myRole = mine.reduce((acc, m) => maxWorkspaceRole(acc, m.role), 'member');
+      return {
+        ...workspace,
+        myRole: normalizeWorkspaceRole(myRole),
+      };
+    });
+
+    res.status(200).json(withMyRole);
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
+export const getWorkspaces = getMyWorkspaces;
+
+// DELETE /api/workspaces/:workspaceId
+export const deleteWorkspace = async (req, res) => {
+  try {
+    const { workspaceId } = req.params;
+    const workspace = await Workspace.findById(workspaceId);
+    if (!workspace) return res.status(404).json({ message: 'Workspace not found' });
+
+    await Promise.all([
+      Team.deleteMany({ workspaceId }),
+      Channel.deleteMany({ workspaceId }),
+      Project.deleteMany({ workspaceId }),
+      Event.deleteMany({ workspaceId }),
+      Note.deleteMany({ workspaceId }),
+      Workspace.deleteOne({ _id: workspaceId }),
+    ]);
+
+    res.json({ message: 'Workspace deleted' });
   } catch (error) {
     res.status(500).json({ message: error.message });
   }
@@ -99,16 +126,8 @@ export const exportWorkspace = async (req, res) => {
     const { format } = req.query;
     const workspaceId = req.params.workspaceId;
 
-    const workspace = await Workspace.findById(workspaceId);
+    const workspace = req.workspace || await Workspace.findById(workspaceId);
     if (!workspace) return res.status(404).json({ error: 'Workspace not found' });
-
-    // Authorization: caller must be a member of the workspace.
-    const isMember = (workspace.members || []).some(
-      (m) => String(m.userId) === String(req.user._id),
-    );
-    if (!isMember) {
-      return res.status(403).json({ error: 'Not authorized to export this workspace' });
-    }
 
     const channels = await Channel.find({ workspaceId });
     const projects = await Project.find({ workspaceId });
@@ -131,10 +150,11 @@ export const exportWorkspace = async (req, res) => {
       doc.fontSize(18).text('Projects');
       projects.forEach((p) => doc.fontSize(12).text(`- ${p.title} (Status: ${p.status})`));
       doc.end();
-    } else {
-      res.status(400).json({ error: 'Invalid format requested' });
+      return undefined;
     }
+
+    return res.status(400).json({ error: 'Invalid format requested' });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    return res.status(500).json({ error: err.message });
   }
 };

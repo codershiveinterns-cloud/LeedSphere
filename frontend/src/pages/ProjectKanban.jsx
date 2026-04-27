@@ -5,7 +5,7 @@ import useAppStore from '../store/useAppStore';
 import {
   Plus, FolderKanban, Trash2, Calendar, X, Upload, FileText, FileImage,
   FileArchive, File as FileIcon, ChevronDown, CheckCircle2, Circle,
-  Clock, Flag, ListTodo, FileStack, Users, GitBranch,
+  Clock, Flag, ListTodo, FileStack, Users, GitBranch, Edit2,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import useCurrentTeamStore from '../store/useCurrentTeamStore';
@@ -91,20 +91,6 @@ const formatBytes = (b) => {
   return `${(b / 1024 / 1024).toFixed(1)} MB`;
 };
 
-const loadDocs = (key) => {
-  try {
-    const raw = localStorage.getItem(key);
-    return raw ? JSON.parse(raw) : [];
-  } catch { return []; }
-};
-
-const useAuthUser = () => {
-  try {
-    const raw = localStorage.getItem('user');
-    return { user: raw ? JSON.parse(raw) : null };
-  } catch { return { user: null }; }
-};
-
 /* ============================================================ */
 /*                        SHARED STYLES                         */
 /* ============================================================ */
@@ -137,21 +123,44 @@ const ProjectWorkspace = () => {
   const [showCreateProject, setShowCreateProject] = useState(false);
   const [showCreateTask, setShowCreateTask] = useState(false);
   const [taskColumn, setTaskColumn] = useState('Todo');
+  // null when creating, the task object when editing — drives the same modal.
+  const [editingTask, setEditingTask] = useState(null);
+  // null when creating a new project, the project object when editing.
+  const [editingProject, setEditingProject] = useState(null);
 
   const [npTitle, setNpTitle] = useState('');
   const [npDesc, setNpDesc] = useState('');
   const [npStart, setNpStart] = useState('');
   const [npEnd, setNpEnd] = useState('');
+  const [npTeamIds, setNpTeamIds] = useState([]);
   const [creatingProject, setCreatingProject] = useState(false);
 
   const [tTitle, setTTitle] = useState('');
   const [tDesc, setTDesc] = useState('');
   const [tPriority, setTPriority] = useState('medium');
-  const [tAssignee, setTAssignee] = useState('');
+  // Multi-assignee — array of userIds. Replaces the previous single-id state.
+  const [tAssignees, setTAssignees] = useState([]);
   const [tDue, setTDue] = useState('');
 
   const isMember = myRole === 'member';
-  const teamMembers = activeTeam ? getTeamMembers(activeTeam._id) : [];
+  const { teams: workspaceTeams } = useAppStore();
+
+  // Members assignable on the active project: union of members across the
+  // teams attached to the project. Falls back to the active team's members
+  // (legacy single-team projects). De-duplicated by user id so the same
+  // person doesn't appear twice when they're in multiple selected teams.
+  const projectAssignableMembers = useMemo(() => {
+    const teamIds = (selectedProject?.teamIds && selectedProject.teamIds.length)
+      ? selectedProject.teamIds.map((t) => (t?._id || t))
+      : (selectedProject?.teamId ? [selectedProject.teamId._id || selectedProject.teamId] : (activeTeam ? [activeTeam._id] : []));
+    const seen = new Map();
+    teamIds.forEach((tid) => {
+      getTeamMembers(tid).forEach((m) => { if (m?.id && !seen.has(m.id)) seen.set(m.id, m); });
+    });
+    return [...seen.values()];
+  }, [selectedProject, activeTeam, getTeamMembers]);
+
+  const teamMembers = projectAssignableMembers; // alias used by older modal callers
 
   useEffect(() => {
     if (!activeWorkspace) return;
@@ -189,25 +198,73 @@ const ProjectWorkspace = () => {
     })();
   }, [selectedProject]);
 
-  const handleCreateProject = async (e) => {
+  const resetProjectForm = () => {
+    setNpTitle(''); setNpDesc(''); setNpStart(''); setNpEnd(''); setNpTeamIds([]);
+  };
+
+  const openEditProject = (project) => {
+    if (isMember) return toast.error('Restricted');
+    setEditingProject(project);
+    setNpTitle(project.title || '');
+    setNpDesc(project.description || '');
+    setNpStart(project.startDate ? new Date(project.startDate).toISOString().slice(0, 10) : '');
+    setNpEnd(project.endDate ? new Date(project.endDate).toISOString().slice(0, 10) : '');
+    const ids = (project.teamIds && project.teamIds.length)
+      ? project.teamIds.map((t) => (t?._id || t))
+      : (project.teamId ? [project.teamId._id || project.teamId] : []);
+    setNpTeamIds(ids.map(String));
+    setShowCreateProject(true);
+  };
+
+  const handleSubmitProject = async (e) => {
     e.preventDefault();
     if (!npTitle.trim() || !activeWorkspace) return;
     setCreatingProject(true);
     try {
-      const res = await api.post('/projects', {
-        workspaceId: activeWorkspace._id,
-        title: npTitle,
-        description: npDesc,
-        startDate: npStart || new Date().toISOString(),
-        endDate: npEnd || null,
-      });
-      setProjects(prev => [res.data, ...prev]);
-      setSelectedProject(res.data);
+      if (editingProject) {
+        const res = await api.put(`/projects/${editingProject._id}`, {
+          title: npTitle,
+          description: npDesc,
+          startDate: npStart || null,
+          endDate: npEnd || null,
+          teamIds: npTeamIds,
+        });
+        setProjects(prev => prev.map(p => p._id === res.data._id ? res.data : p));
+        if (selectedProject?._id === res.data._id) setSelectedProject(res.data);
+        toast.success(`"${res.data.title}" updated`);
+      } else {
+        const res = await api.post('/projects', {
+          workspaceId: activeWorkspace._id,
+          title: npTitle,
+          description: npDesc,
+          startDate: npStart || new Date().toISOString(),
+          endDate: npEnd || null,
+          teamIds: npTeamIds,
+        });
+        setProjects(prev => [res.data, ...prev]);
+        setSelectedProject(res.data);
+        toast.success(`"${res.data.title}" created`);
+      }
       setShowCreateProject(false);
-      setNpTitle(''); setNpDesc(''); setNpStart(''); setNpEnd('');
-      toast.success(`"${res.data.title}" created`);
+      setEditingProject(null);
+      resetProjectForm();
     } catch { toast.error('Failed'); }
     finally { setCreatingProject(false); }
+  };
+
+  const handleDeleteProject = async (project) => {
+    if (!project) return;
+    if (isMember) return toast.error('Restricted');
+    if (!confirm(`Delete "${project.title}"? All its tasks will also be removed.`)) return;
+    try {
+      await api.delete(`/projects/${project._id}`);
+      setProjects(prev => prev.filter(p => p._id !== project._id));
+      if (selectedProject?._id === project._id) {
+        const next = projects.find(p => p._id !== project._id) || null;
+        setSelectedProject(next);
+      }
+      toast.success('Project deleted');
+    } catch { toast.error('Failed to delete'); }
   };
 
   const updateProjectStatus = async (status) => {
@@ -242,29 +299,71 @@ const ProjectWorkspace = () => {
     }
   };
 
+  const resetTaskForm = () => {
+    setTTitle(''); setTDesc(''); setTPriority('medium'); setTAssignees([]); setTDue('');
+  };
+
   const openCreateTask = (column) => {
     if (isMember) return toast.error('Restricted');
+    setEditingTask(null);
+    resetTaskForm();
     setTaskColumn(column);
     setShowCreateTask(true);
   };
 
-  const handleCreateTask = async (e) => {
+  // Open the same modal in edit mode — populates fields from the existing task.
+  const openEditTask = (task) => {
+    if (isMember) return toast.error('Restricted');
+    setEditingTask(task);
+    setTaskColumn(task.status);
+    setTTitle(task.title || '');
+    setTDesc(task.description || '');
+    setTPriority(task.priority || 'medium');
+    // Hydrate the multi-assignee selection from `assignees[]` (new field)
+    // with a fall-back to the legacy single `assignedTo` reference.
+    const ids = Array.isArray(task.assignees) && task.assignees.length
+      ? task.assignees.map((a) => String(a?._id || a))
+      : (task.assignedTo ? [String(task.assignedTo?._id || task.assignedTo)] : []);
+    setTAssignees(ids);
+    setTDue(task.dueDate ? new Date(task.dueDate).toISOString().slice(0, 10) : '');
+    setShowCreateTask(true);
+  };
+
+  const handleSubmitTask = async (e) => {
     e.preventDefault();
     if (!tTitle.trim() || !selectedProject) return;
     try {
-      const res = await api.post('/tasks', {
-        projectId: selectedProject._id,
-        title: tTitle,
-        description: tDesc,
-        status: taskColumn,
-        priority: tPriority,
-        assignedTo: tAssignee || null,
-        dueDate: tDue || null,
-      });
-      setTasks(prev => ({ ...prev, [taskColumn]: [...prev[taskColumn], res.data] }));
+      if (editingTask) {
+        // Edit path — PUT /tasks/:id, then patch the right column in state.
+        const res = await api.put(`/tasks/${editingTask._id}`, {
+          title: tTitle,
+          description: tDesc,
+          priority: tPriority,
+          assignees: tAssignees,
+          dueDate: tDue || null,
+        });
+        const updated = res.data;
+        setTasks(prev => ({
+          ...prev,
+          [editingTask.status]: prev[editingTask.status].map(t => t._id === updated._id ? updated : t),
+        }));
+        toast.success('Task updated');
+      } else {
+        const res = await api.post('/tasks', {
+          projectId: selectedProject._id,
+          title: tTitle,
+          description: tDesc,
+          status: taskColumn,
+          priority: tPriority,
+          assignees: tAssignees,
+          dueDate: tDue || null,
+        });
+        setTasks(prev => ({ ...prev, [taskColumn]: [...prev[taskColumn], res.data] }));
+        toast.success('Task created');
+      }
       setShowCreateTask(false);
-      setTTitle(''); setTDesc(''); setTPriority('medium'); setTAssignee(''); setTDue('');
-      toast.success('Task created');
+      setEditingTask(null);
+      resetTaskForm();
     } catch { toast.error('Failed'); }
   };
 
@@ -298,8 +397,10 @@ const ProjectWorkspace = () => {
 
         <CreateProjectModal
           open={showCreateProject}
-          onClose={() => setShowCreateProject(false)}
-          {...{ npTitle, setNpTitle, npDesc, setNpDesc, npStart, setNpStart, npEnd, setNpEnd, creatingProject, onSubmit: handleCreateProject }}
+          onClose={() => { setShowCreateProject(false); setEditingProject(null); resetProjectForm(); }}
+          editing={!!editingProject}
+          teams={workspaceTeams}
+          {...{ npTitle, setNpTitle, npDesc, setNpDesc, npStart, setNpStart, npEnd, setNpEnd, npTeamIds, setNpTeamIds, creatingProject, onSubmit: handleSubmitProject }}
         />
       </div>
     );
@@ -323,6 +424,8 @@ const ProjectWorkspace = () => {
               <ProjectHeader
                 project={selectedProject}
                 onStatusChange={updateProjectStatus}
+                onEdit={() => openEditProject(selectedProject)}
+                onDelete={() => handleDeleteProject(selectedProject)}
                 disabled={isMember}
               />
             </div>
@@ -337,6 +440,7 @@ const ProjectWorkspace = () => {
                 loading={tasksLoading}
                 onDragEnd={onDragEnd}
                 onAdd={openCreateTask}
+                onEdit={openEditTask}
                 onDelete={handleDeleteTask}
                 disabled={isMember}
               />
@@ -359,16 +463,19 @@ const ProjectWorkspace = () => {
 
       <CreateProjectModal
         open={showCreateProject}
-        onClose={() => setShowCreateProject(false)}
-        {...{ npTitle, setNpTitle, npDesc, setNpDesc, npStart, setNpStart, npEnd, setNpEnd, creatingProject, onSubmit: handleCreateProject }}
+        onClose={() => { setShowCreateProject(false); setEditingProject(null); resetProjectForm(); }}
+        editing={!!editingProject}
+        teams={workspaceTeams}
+        {...{ npTitle, setNpTitle, npDesc, setNpDesc, npStart, setNpStart, npEnd, setNpEnd, npTeamIds, setNpTeamIds, creatingProject, onSubmit: handleSubmitProject }}
       />
 
       <CreateTaskModal
         open={showCreateTask}
-        onClose={() => setShowCreateTask(false)}
+        onClose={() => { setShowCreateTask(false); setEditingTask(null); }}
         column={taskColumn}
-        members={teamMembers}
-        {...{ tTitle, setTTitle, tDesc, setTDesc, tPriority, setTPriority, tAssignee, setTAssignee, tDue, setTDue, onSubmit: handleCreateTask }}
+        members={projectAssignableMembers}
+        editing={!!editingTask}
+        {...{ tTitle, setTTitle, tDesc, setTDesc, tPriority, setTPriority, tAssignees, setTAssignees, tDue, setTDue, onSubmit: handleSubmitTask }}
       />
     </div>
   );
@@ -414,8 +521,12 @@ const TopBar = ({ projects, selectedProject, onSelect, onNewProject }) => (
 /*                       PROJECT HEADER                         */
 /* ============================================================ */
 
-const ProjectHeader = ({ project, onStatusChange, disabled }) => {
+const ProjectHeader = ({ project, onStatusChange, onEdit, onDelete, disabled }) => {
   const status = PROJECT_STATUS[project.status] || PROJECT_STATUS.active;
+  // Render the team chips inline so it's clear which teams own the project.
+  const teamChips = (project.teamIds && project.teamIds.length)
+    ? project.teamIds
+    : (project.teamId ? [project.teamId] : []);
   return (
     <div className={`${SURFACE} rounded-2xl p-6 shadow-sm transition-colors duration-200`}>
       <div className="flex items-start justify-between gap-4 flex-wrap">
@@ -424,6 +535,19 @@ const ProjectHeader = ({ project, onStatusChange, disabled }) => {
           <p className={`text-sm ${TEXT_MUTED} mt-1 line-clamp-2`}>
             {project.description || 'No description added yet.'}
           </p>
+          {teamChips.length > 0 && (
+            <div className="flex items-center flex-wrap gap-1.5 mt-3">
+              {teamChips.map((t) => {
+                const tid = t?._id || t;
+                const tname = t?.name || 'Team';
+                return (
+                  <span key={tid} className="inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full bg-indigo-50 text-indigo-700 border border-indigo-100 dark:bg-indigo-500/10 dark:text-indigo-300 dark:border-indigo-500/30">
+                    <Users size={10} /> {tname}
+                  </span>
+                );
+              })}
+            </div>
+          )}
           {(project.startDate || project.endDate) && (
             <div className={`flex items-center gap-4 mt-3 text-xs ${TEXT_SUBTLE}`}>
               {project.startDate && (
@@ -459,6 +583,25 @@ const ProjectHeader = ({ project, onStatusChange, disabled }) => {
             <span className="w-1.5 h-1.5 rounded-full bg-current opacity-70" />
             {status.label}
           </span>
+
+          {!disabled && onEdit && (
+            <button
+              onClick={onEdit}
+              title="Edit project"
+              className="p-2 rounded-lg text-slate-500 dark:text-gray-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-gray-800 transition-colors active:scale-95"
+            >
+              <Edit2 size={15} />
+            </button>
+          )}
+          {!disabled && onDelete && (
+            <button
+              onClick={onDelete}
+              title="Delete project"
+              className="p-2 rounded-lg text-slate-500 dark:text-gray-400 hover:text-red-500 dark:hover:text-red-400 hover:bg-red-50 dark:hover:bg-red-500/10 transition-colors active:scale-95"
+            >
+              <Trash2 size={15} />
+            </button>
+          )}
         </div>
       </div>
     </div>
@@ -522,7 +665,7 @@ const Tabs = ({ active, onChange }) => (
 /*                          TASKS TAB                           */
 /* ============================================================ */
 
-const TasksTab = ({ tasks, loading, onDragEnd, onAdd, onDelete, disabled }) => (
+const TasksTab = ({ tasks, loading, onDragEnd, onAdd, onEdit, onDelete, disabled }) => (
   <div>
     <div className="flex items-center justify-between mb-4">
       <div>
@@ -547,6 +690,7 @@ const TasksTab = ({ tasks, loading, onDragEnd, onAdd, onDelete, disabled }) => (
             tasks={tasks[col.key] || []}
             loading={loading}
             onAdd={() => onAdd(col.key)}
+            onEdit={onEdit}
             onDelete={onDelete}
             disabled={disabled}
           />
@@ -556,7 +700,7 @@ const TasksTab = ({ tasks, loading, onDragEnd, onAdd, onDelete, disabled }) => (
   </div>
 );
 
-const KanbanColumn = ({ column, tasks, loading, onAdd, onDelete, disabled }) => (
+const KanbanColumn = ({ column, tasks, loading, onAdd, onEdit, onDelete, disabled }) => (
   <div className={`${SURFACE} rounded-2xl flex flex-col min-h-[340px] transition-colors duration-200`}>
     <div className="px-4 py-3 flex items-center justify-between border-b border-slate-100 dark:border-gray-800">
       <div className="flex items-center gap-2">
@@ -601,12 +745,22 @@ const KanbanColumn = ({ column, tasks, loading, onAdd, onDelete, disabled }) => 
                     }`}
                   >
                     <TaskCard task={task} />
-                    <button
-                      onClick={(e) => { e.stopPropagation(); onDelete(task._id, column.key); }}
-                      className="absolute top-2 right-2 p-1 rounded text-slate-300 dark:text-gray-600 hover:text-red-500 dark:hover:text-red-400 hover:bg-red-50 dark:hover:bg-red-500/10 opacity-0 group-hover:opacity-100 transition-all duration-150 active:scale-90"
-                    >
-                      <Trash2 size={13} />
-                    </button>
+                    <div className="absolute top-2 right-2 flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-all duration-150">
+                      <button
+                        onClick={(e) => { e.stopPropagation(); onEdit?.(task); }}
+                        className="p-1 rounded text-slate-300 dark:text-gray-600 hover:text-blue-600 dark:hover:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-500/10 active:scale-90"
+                        title="Edit task"
+                      >
+                        <Edit2 size={13} />
+                      </button>
+                      <button
+                        onClick={(e) => { e.stopPropagation(); onDelete(task._id, column.key); }}
+                        className="p-1 rounded text-slate-300 dark:text-gray-600 hover:text-red-500 dark:hover:text-red-400 hover:bg-red-50 dark:hover:bg-red-500/10 active:scale-90"
+                        title="Delete task"
+                      >
+                        <Trash2 size={13} />
+                      </button>
+                    </div>
                   </div>
                 )}
               </Draggable>
@@ -649,7 +803,11 @@ const EmptyColumn = ({ onAdd, disabled }) => (
 const TaskCard = ({ task }) => {
   const pr = PRIORITY[task.priority] || PRIORITY.medium;
   const overdue = task.dueDate && task.status !== 'Done' && new Date(task.dueDate) < new Date();
-  const assignee = task.assignedTo;
+  // Prefer the new multi-assignee field; fall back to the legacy single ref
+  // so older tasks still render correctly.
+  const assignees = (Array.isArray(task.assignees) && task.assignees.length)
+    ? task.assignees.filter(Boolean)
+    : (task.assignedTo ? [task.assignedTo] : []);
 
   return (
     <>
@@ -672,12 +830,22 @@ const TaskCard = ({ task }) => {
             </span>
           )}
         </div>
-        {assignee?.name ? (
-          <div
-            className={`w-6 h-6 rounded-full ${avatarBg(assignee.name)} text-white text-[10px] font-semibold flex items-center justify-center ring-2 ring-white dark:ring-[#0d1117]`}
-            title={assignee.name}
-          >
-            {initials(assignee.name)}
+        {assignees.length > 0 ? (
+          <div className="flex -space-x-1.5">
+            {assignees.slice(0, 3).map((a) => (
+              <div
+                key={a._id || a}
+                className={`w-6 h-6 rounded-full ${avatarBg(a.name || '')} text-white text-[10px] font-semibold flex items-center justify-center ring-2 ring-white dark:ring-[#0d1117]`}
+                title={a.name || ''}
+              >
+                {initials(a.name)}
+              </div>
+            ))}
+            {assignees.length > 3 && (
+              <div className="w-6 h-6 rounded-full bg-slate-200 dark:bg-gray-700 text-slate-600 dark:text-gray-300 text-[9px] font-semibold flex items-center justify-center ring-2 ring-white dark:ring-[#0d1117]">
+                +{assignees.length - 3}
+              </div>
+            )}
           </div>
         ) : (
           <div className="w-6 h-6 rounded-full bg-slate-100 dark:bg-gray-800 text-slate-400 dark:text-gray-500 text-[10px] flex items-center justify-center">—</div>
@@ -691,34 +859,97 @@ const TaskCard = ({ task }) => {
 /*                        DOCUMENTS TAB                         */
 /* ============================================================ */
 
+// Hard cap so we don't blow past localStorage's ~5MB quota with a single
+// file. Anything larger needs a real backend upload — out of scope here.
+const MAX_DOC_BYTES = 4 * 1024 * 1024;
+
+const readFileAsDataURL = (file) => new Promise((resolve, reject) => {
+  const reader = new FileReader();
+  reader.onload = () => resolve(reader.result);
+  reader.onerror = () => reject(reader.error);
+  reader.readAsDataURL(file);
+});
+
+/**
+ * Server-backed Documents tab. Files live on the project document so every
+ * team member fetches the same list — no more "I uploaded it but my
+ * teammate can't see it". Local-only persistence is gone; uploads POST to
+ * /api/projects/:id/documents and re-fetch.
+ */
 const DocumentsTab = ({ projectId }) => {
-  const storageKey = `project-docs:${projectId}`;
-  const { user } = useAuthUser();
-  const [docs, setDocs] = useState(() => loadDocs(storageKey));
+  const [docs, setDocs] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [uploading, setUploading] = useState(false);
 
-  const persist = (next) => {
-    setDocs(next);
-    localStorage.setItem(storageKey, JSON.stringify(next));
-  };
+  // Initial fetch + refetch on project switch.
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    api.get(`/projects/${projectId}/documents`)
+      .then((res) => { if (!cancelled) setDocs(res.data || []); })
+      .catch(() => { if (!cancelled) setDocs([]); })
+      .finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
+  }, [projectId]);
 
-  const handleUpload = (e) => {
+  const handleUpload = async (e) => {
     const files = Array.from(e.target.files || []);
     if (!files.length) return;
-    const added = files.map(f => ({
-      id: `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
-      name: f.name,
-      size: f.size,
-      uploadedBy: user?.name || 'You',
-      uploadedAt: new Date().toISOString(),
-    }));
-    persist([...added, ...docs]);
-    toast.success(`${added.length} file${added.length > 1 ? 's' : ''} uploaded`);
-    e.target.value = '';
+    setUploading(true);
+    try {
+      const added = [];
+      for (const f of files) {
+        if (f.size > MAX_DOC_BYTES) {
+          toast.error(`"${f.name}" is too large (max 4 MB)`);
+          continue;
+        }
+        const dataUrl = await readFileAsDataURL(f);
+        try {
+          const res = await api.post(`/projects/${projectId}/documents`, {
+            id: `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+            name: f.name,
+            size: f.size,
+            mime: f.type || '',
+            dataUrl,
+          });
+          added.push(res.data);
+        } catch {
+          toast.error(`Failed to upload "${f.name}"`);
+        }
+      }
+      if (added.length) {
+        setDocs((prev) => [...added, ...prev]);
+        toast.success(`${added.length} file${added.length > 1 ? 's' : ''} uploaded`);
+      }
+    } finally {
+      setUploading(false);
+      e.target.value = '';
+    }
   };
 
-  const remove = (id) => {
-    persist(docs.filter(d => d.id !== id));
-    toast.success('Deleted');
+  const openDoc = (d) => {
+    if (!d?.dataUrl) {
+      toast.error('This file has no content. Please re-upload.');
+      return;
+    }
+    const a = document.createElement('a');
+    a.href = d.dataUrl;
+    a.target = '_blank';
+    a.rel = 'noopener noreferrer';
+    a.download = d.name;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+  };
+
+  const remove = async (id) => {
+    try {
+      await api.delete(`/projects/${projectId}/documents/${id}`);
+      setDocs((prev) => prev.filter((d) => d.id !== id));
+      toast.success('Deleted');
+    } catch {
+      toast.error('Failed to delete');
+    }
   };
 
   return (
@@ -728,35 +959,58 @@ const DocumentsTab = ({ projectId }) => {
           <h3 className={`text-lg font-semibold ${TEXT_PRIMARY}`}>Documents</h3>
           <p className={`text-sm ${TEXT_MUTED} mt-0.5`}>Manage project files</p>
         </div>
-        <label className={`inline-flex items-center gap-1.5 ${BTN_PRIMARY} px-4 py-2 rounded-lg text-sm font-medium cursor-pointer`}>
-          <Upload size={15} /> Upload document
-          <input type="file" multiple onChange={handleUpload} className="hidden" />
+        <label className={`inline-flex items-center gap-1.5 ${BTN_PRIMARY} px-4 py-2 rounded-lg text-sm font-medium cursor-pointer ${uploading ? 'opacity-70 pointer-events-none' : ''}`}>
+          <Upload size={15} /> {uploading ? 'Uploading…' : 'Upload document'}
+          <input type="file" multiple onChange={handleUpload} className="hidden" disabled={uploading} />
         </label>
       </div>
 
-      {docs.length === 0 ? (
+      {loading ? (
+        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
+          {Array.from({ length: 3 }).map((_, i) => (
+            <div key={i} className={`${SURFACE} rounded-2xl p-4 flex items-start gap-3`}>
+              <div className={`${SKELETON} w-11 h-11`} />
+              <div className="flex-1 flex flex-col gap-2 py-1">
+                <div className={`${SKELETON} h-3 w-3/5`} />
+                <div className={`${SKELETON} h-2.5 w-2/5`} />
+                <div className={`${SKELETON} h-2.5 w-1/3`} />
+              </div>
+            </div>
+          ))}
+        </div>
+      ) : docs.length === 0 ? (
         <EmptyDocuments onUpload={() => document.querySelector('input[type="file"]')?.click()} />
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
           {docs.map(d => {
             const { icon: Icon, color } = fileIconFor(d.name);
+            // The new server payload puts the uploader's name in
+            // `uploadedByName`. Older entries used `uploadedBy` as a string;
+            // accept either.
+            const uploader = d.uploadedByName || d.uploadedBy?.name || (typeof d.uploadedBy === 'string' ? d.uploadedBy : 'Someone');
             return (
-              <div key={d.id} className={`group ${SURFACE} ${SURFACE_HOVER} rounded-2xl p-4 flex items-start gap-3 hover:shadow-md hover:-translate-y-0.5 transition-all duration-150 animate-fade-in`}>
-                <div className={`w-11 h-11 rounded-xl ${color} flex items-center justify-center shrink-0`}>
-                  <Icon size={20} />
-                </div>
-                <div className="flex-1 min-w-0">
-                  <p className={`text-sm font-semibold ${TEXT_PRIMARY} truncate`}>{d.name}</p>
-                  <p className={`text-xs ${TEXT_MUTED} mt-0.5 truncate`}>
-                    Uploaded by {d.uploadedBy}
-                  </p>
-                  <p className="text-[11px] text-slate-400 dark:text-gray-600 mt-1">
-                    {formatFullDate(d.uploadedAt)}{d.size ? ` · ${formatBytes(d.size)}` : ''}
-                  </p>
-                </div>
+              <div key={d.id} className={`group relative ${SURFACE} ${SURFACE_HOVER} rounded-2xl flex items-start gap-3 transition-all duration-150 animate-fade-in`}>
                 <button
-                  onClick={() => remove(d.id)}
-                  className="p-1.5 text-slate-300 dark:text-gray-600 hover:text-red-500 dark:hover:text-red-400 hover:bg-red-50 dark:hover:bg-red-500/10 rounded-lg opacity-0 group-hover:opacity-100 transition-all active:scale-90"
+                  onClick={() => openDoc(d)}
+                  className="flex-1 flex items-start gap-3 p-4 text-left hover:shadow-md hover:-translate-y-0.5 transition-all duration-150 rounded-2xl min-w-0"
+                  title="Open file"
+                >
+                  <div className={`w-11 h-11 rounded-xl ${color} flex items-center justify-center shrink-0`}>
+                    <Icon size={20} />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className={`text-sm font-semibold ${TEXT_PRIMARY} truncate`}>{d.name}</p>
+                    <p className={`text-xs ${TEXT_MUTED} mt-0.5 truncate`}>
+                      Uploaded by {uploader}
+                    </p>
+                    <p className="text-[11px] text-slate-400 dark:text-gray-600 mt-1">
+                      {formatFullDate(d.uploadedAt)}{d.size ? ` · ${formatBytes(d.size)}` : ''}
+                    </p>
+                  </div>
+                </button>
+                <button
+                  onClick={(e) => { e.stopPropagation(); remove(d.id); }}
+                  className="absolute top-3 right-3 p-1.5 text-slate-300 dark:text-gray-600 hover:text-red-500 dark:hover:text-red-400 hover:bg-red-50 dark:hover:bg-red-500/10 rounded-lg opacity-0 group-hover:opacity-100 transition-all active:scale-90"
                 >
                   <Trash2 size={14} />
                 </button>
@@ -1020,45 +1274,105 @@ const ModalShell = ({ open, onClose, title, children }) => {
   );
 };
 
-const CreateProjectModal = ({ open, onClose, npTitle, setNpTitle, npDesc, setNpDesc, npStart, setNpStart, npEnd, setNpEnd, creatingProject, onSubmit }) => (
-  <ModalShell open={open} onClose={onClose} title="Create project">
-    <form onSubmit={onSubmit} className="p-6 flex flex-col gap-4">
-      <div>
-        <label className={labelCls}>Project name</label>
-        <input autoFocus value={npTitle} onChange={e => setNpTitle(e.target.value)} className={inputCls} placeholder="e.g. Q4 Product Launch" />
-      </div>
-      <div>
-        <label className={labelCls}>Description <span className="text-slate-400 dark:text-gray-600 font-normal">(optional)</span></label>
-        <textarea value={npDesc} onChange={e => setNpDesc(e.target.value)} rows={2} className={inputCls + ' resize-none'} placeholder="What's this project about?" />
-      </div>
-      <div className="grid grid-cols-2 gap-3">
-        <div>
-          <label className={labelCls}>Start date</label>
-          <input type="date" value={npStart} onChange={e => setNpStart(e.target.value)} className={inputCls} />
-        </div>
-        <div>
-          <label className={labelCls}>End date</label>
-          <input type="date" value={npEnd} onChange={e => setNpEnd(e.target.value)} className={inputCls} />
-        </div>
-      </div>
-      <div className="flex justify-end gap-2 mt-2">
-        <button type="button" onClick={onClose} className="px-4 py-2 text-sm text-slate-600 dark:text-gray-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-gray-800 rounded-lg transition-all active:scale-95">Cancel</button>
-        <button
-          type="submit"
-          disabled={!npTitle.trim() || creatingProject}
-          className={`px-4 py-2 text-sm font-medium ${BTN_PRIMARY} rounded-lg disabled:opacity-50`}
-        >
-          {creatingProject ? 'Creating...' : 'Create project'}
-        </button>
-      </div>
-    </form>
-  </ModalShell>
-);
-
-const CreateTaskModal = ({ open, onClose, column, members, tTitle, setTTitle, tDesc, setTDesc, tPriority, setTPriority, tAssignee, setTAssignee, tDue, setTDue, onSubmit }) => {
-  const colLabel = COLUMNS.find(c => c.key === column)?.label || column;
+const CreateProjectModal = ({ open, onClose, editing = false, teams = [], npTitle, setNpTitle, npDesc, setNpDesc, npStart, setNpStart, npEnd, setNpEnd, npTeamIds = [], setNpTeamIds, creatingProject, onSubmit }) => {
+  const toggleTeam = (id) => {
+    if (!setNpTeamIds) return;
+    const sid = String(id);
+    setNpTeamIds(npTeamIds.includes(sid)
+      ? npTeamIds.filter((x) => x !== sid)
+      : [...npTeamIds, sid]);
+  };
   return (
-    <ModalShell open={open} onClose={onClose} title={<>New task <span className="text-slate-400 dark:text-gray-500 font-normal">→ {colLabel}</span></>}>
+    <ModalShell open={open} onClose={onClose} title={editing ? 'Edit project' : 'Create project'}>
+      <form onSubmit={onSubmit} className="p-6 flex flex-col gap-4">
+        <div>
+          <label className={labelCls}>Project name</label>
+          <input autoFocus value={npTitle} onChange={e => setNpTitle(e.target.value)} className={inputCls} placeholder="e.g. Q4 Product Launch" />
+        </div>
+        <div>
+          <label className={labelCls}>Description <span className="text-slate-400 dark:text-gray-600 font-normal">(optional)</span></label>
+          <textarea value={npDesc} onChange={e => setNpDesc(e.target.value)} rows={2} className={inputCls + ' resize-none'} placeholder="What's this project about?" />
+        </div>
+
+        {/* Team multi-select. Members of selected teams become the
+            assignable pool when creating tasks under this project. */}
+        <div>
+          <label className={labelCls}>
+            Teams <span className="text-slate-400 dark:text-gray-600 font-normal">({npTeamIds.length} selected)</span>
+          </label>
+          {teams.length === 0 ? (
+            <p className="text-xs text-slate-500 dark:text-gray-500">No teams available in this workspace.</p>
+          ) : (
+            <div className="max-h-40 overflow-y-auto border border-slate-200 dark:border-gray-700 rounded-lg divide-y divide-slate-100 dark:divide-gray-800">
+              {teams.map((t) => {
+                const sid = String(t._id);
+                const checked = npTeamIds.includes(sid);
+                return (
+                  <button
+                    key={sid}
+                    type="button"
+                    onClick={() => toggleTeam(sid)}
+                    className={`w-full flex items-center gap-3 px-3 py-2 text-left transition-colors ${
+                      checked ? 'bg-indigo-50 dark:bg-indigo-500/10' : 'hover:bg-slate-50 dark:hover:bg-[#0d1117]/60'
+                    }`}
+                  >
+                    <span className={`w-5 h-5 rounded border flex items-center justify-center shrink-0 ${
+                      checked ? 'bg-indigo-600 border-indigo-600 text-white' : 'border-slate-300 dark:border-gray-600 text-transparent'
+                    }`}>
+                      <CheckCircle2 size={12} />
+                    </span>
+                    <span className="text-sm text-slate-800 dark:text-gray-100 truncate flex-1">{t.name}</span>
+                  </button>
+                );
+              })}
+            </div>
+          )}
+          <p className="mt-1.5 text-[11px] text-slate-500 dark:text-gray-500">
+            Only members of the selected teams will be assignable on tasks.
+          </p>
+        </div>
+
+        <div className="grid grid-cols-2 gap-3">
+          <div>
+            <label className={labelCls}>Start date</label>
+            <input type="date" value={npStart} onChange={e => setNpStart(e.target.value)} className={inputCls} />
+          </div>
+          <div>
+            <label className={labelCls}>End date</label>
+            <input type="date" value={npEnd} onChange={e => setNpEnd(e.target.value)} className={inputCls} />
+          </div>
+        </div>
+        <div className="flex justify-end gap-2 mt-2">
+          <button type="button" onClick={onClose} className="px-4 py-2 text-sm text-slate-600 dark:text-gray-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-gray-800 rounded-lg transition-all active:scale-95">Cancel</button>
+          <button
+            type="submit"
+            disabled={!npTitle.trim() || creatingProject}
+            className={`px-4 py-2 text-sm font-medium ${BTN_PRIMARY} rounded-lg disabled:opacity-50`}
+          >
+            {creatingProject ? (editing ? 'Saving…' : 'Creating…') : (editing ? 'Save changes' : 'Create project')}
+          </button>
+        </div>
+      </form>
+    </ModalShell>
+  );
+};
+
+const CreateTaskModal = ({ open, onClose, column, members, editing = false, tTitle, setTTitle, tDesc, setTDesc, tPriority, setTPriority, tAssignees = [], setTAssignees, tDue, setTDue, onSubmit }) => {
+  const colLabel = COLUMNS.find(c => c.key === column)?.label || column;
+  const titleNode = editing
+    ? <>Edit task <span className="text-slate-400 dark:text-gray-500 font-normal">in {colLabel}</span></>
+    : <>New task <span className="text-slate-400 dark:text-gray-500 font-normal">→ {colLabel}</span></>;
+
+  const toggleAssignee = (id) => {
+    if (!setTAssignees) return;
+    const sid = String(id);
+    setTAssignees(tAssignees.includes(sid)
+      ? tAssignees.filter((x) => x !== sid)
+      : [...tAssignees, sid]);
+  };
+
+  return (
+    <ModalShell open={open} onClose={onClose} title={titleNode}>
       <form onSubmit={onSubmit} className="p-6 flex flex-col gap-4">
         <div>
           <label className={labelCls}>Title</label>
@@ -1078,16 +1392,57 @@ const CreateTaskModal = ({ open, onClose, column, members, tTitle, setTTitle, tD
             </select>
           </div>
           <div>
-            <label className={labelCls}>Assignee</label>
-            <select value={tAssignee} onChange={e => setTAssignee(e.target.value)} className={inputCls}>
-              <option value="">Unassigned</option>
-              {members.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
-            </select>
+            <label className={labelCls}>Due date</label>
+            <input type="date" value={tDue} onChange={e => setTDue(e.target.value)} className={inputCls} />
           </div>
         </div>
+
+        {/* Multi-assignee picker — pool comes from the project's selected
+            teams. If the project has no teams selected, members[] will be
+            empty and we explain why instead of silently showing nothing. */}
         <div>
-          <label className={labelCls}>Due date</label>
-          <input type="date" value={tDue} onChange={e => setTDue(e.target.value)} className={inputCls} />
+          <label className={labelCls}>
+            Assignees <span className="text-slate-400 dark:text-gray-600 font-normal">({tAssignees.length} selected)</span>
+          </label>
+          {members.length === 0 ? (
+            <p className="text-xs text-slate-500 dark:text-gray-500">
+              No assignable members. Add a team to this project first.
+            </p>
+          ) : (
+            <div className="max-h-44 overflow-y-auto border border-slate-200 dark:border-gray-700 rounded-lg divide-y divide-slate-100 dark:divide-gray-800">
+              {members.map((m) => {
+                const sid = String(m.id);
+                const checked = tAssignees.includes(sid);
+                return (
+                  <button
+                    key={sid}
+                    type="button"
+                    onClick={() => toggleAssignee(sid)}
+                    className={`w-full flex items-center gap-3 px-3 py-2 text-left transition-colors ${
+                      checked ? 'bg-indigo-50 dark:bg-indigo-500/10' : 'hover:bg-slate-50 dark:hover:bg-[#0d1117]/60'
+                    }`}
+                  >
+                    <span className={`w-5 h-5 rounded border flex items-center justify-center shrink-0 ${
+                      checked ? 'bg-indigo-600 border-indigo-600 text-white' : 'border-slate-300 dark:border-gray-600 text-transparent'
+                    }`}>
+                      <CheckCircle2 size={12} />
+                    </span>
+                    {m.avatar && m.avatar.startsWith('http') ? (
+                      <img src={m.avatar} alt={m.name} className="w-6 h-6 rounded-full object-cover" />
+                    ) : (
+                      <div className={`w-6 h-6 rounded-full ${avatarBg(m.name || '')} text-white text-[10px] font-semibold flex items-center justify-center`}>
+                        {initials(m.name)}
+                      </div>
+                    )}
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm text-slate-800 dark:text-gray-100 truncate">{m.name}</p>
+                      {m.email && <p className="text-[11px] text-slate-500 dark:text-gray-500 truncate">{m.email}</p>}
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+          )}
         </div>
         <div className="flex justify-end gap-2 mt-2">
           <button type="button" onClick={onClose} className="px-4 py-2 text-sm text-slate-600 dark:text-gray-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-gray-800 rounded-lg transition-all active:scale-95">Cancel</button>
@@ -1096,7 +1451,7 @@ const CreateTaskModal = ({ open, onClose, column, members, tTitle, setTTitle, tD
             disabled={!tTitle.trim()}
             className={`px-4 py-2 text-sm font-medium ${BTN_PRIMARY} rounded-lg disabled:opacity-50`}
           >
-            Create task
+            {editing ? 'Save changes' : 'Create task'}
           </button>
         </div>
       </form>

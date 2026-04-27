@@ -1,41 +1,105 @@
-import jwt from 'jsonwebtoken';
-import User from '../models/User.js';
+import { verifyFirebaseTokenAndGetUser } from '../services/firebaseUser.js';
+import mongoose from 'mongoose';
+import Workspace from '../models/Workspace.js';
+
+const extractBearerToken = (authorizationHeader = '') => {
+  if (!authorizationHeader) return null;
+
+  const [scheme, token] = authorizationHeader.split(' ');
+  if (!/^Bearer$/i.test(scheme) || !token) return null;
+
+  return token.trim();
+};
 
 export const protect = async (req, res, next) => {
   try {
-    let token;
-
-    if (req.headers.authorization?.startsWith('Bearer')) {
-      token = req.headers.authorization.split(' ')[1];
-    } else if (req.cookies?.token) {
-      token = req.cookies.token;
-    }
+    const authHeader = req.headers.authorization || '';
+    const token = extractBearerToken(authHeader);
 
     if (!token) {
-      return res.status(401).json({ message: 'Not authorized, no token' });
+      console.warn('[auth] missing bearer token', {
+        method: req.method,
+        path: req.originalUrl,
+        hasAuthorizationHeader: Boolean(authHeader),
+      });
+      return res.status(401).json({
+        message: 'Not authorized, missing bearer token',
+        code: 'missing-token',
+      });
     }
 
-    const decoded = jwt.verify(token, process.env.JWT_SECRET);
-    const user = await User.findById(decoded.id).select('-password');
+    let decoded;
+    let user;
+    try {
+      const result = await verifyFirebaseTokenAndGetUser(token);
+      decoded = result.decoded;
+      user = result.user;
+    } catch (err) {
+      console.warn('[auth] verifyIdToken failed', {
+        method: req.method,
+        path: req.originalUrl,
+        code: err?.code,
+        message: err?.message,
+      });
+      return res.status(401).json({
+        message: 'Not authorized, invalid token',
+        code: err?.code === 'auth/id-token-expired' ? 'token-expired' : 'invalid-token',
+      });
+    }
 
-    if (!user) {
-      return res.status(401).json({ message: 'Not authorized, user not found' });
+    console.info('[auth] decoded Firebase user', {
+      uid: decoded.uid,
+      email: decoded.email || null,
+      method: req.method,
+      path: req.originalUrl,
+    });
+
+    if (decoded.email_verified === false) {
+      return res.status(403).json({ message: 'Email not verified', code: 'email-not-verified' });
     }
 
     req.user = user;
+    req.firebaseUser = decoded;
+
+    const h = req.headers || {};
+    const workspaceId = (
+      req.params?.workspaceId ||
+      req.body?.workspaceId ||
+      req.query?.workspaceId ||
+      h['x-workspace-id'] ||
+      h.workspaceid ||
+      h['workspace-id'] ||
+      null
+    );
+
+    if (workspaceId && mongoose.isValidObjectId(workspaceId)) {
+      const workspace = await Workspace.findById(workspaceId).select('members');
+      if (workspace) {
+        const member = (workspace.members || []).find((m) => String(m.userId) === String(user._id));
+        if (member) {
+          req.userRole = member.role;
+          req.member = {
+            userId: user._id,
+            workspaceId: workspace._id,
+            role: member.role,
+          };
+        }
+      }
+    }
+
     next();
   } catch (error) {
-    return res.status(401).json({ message: 'Not authorized, token failed' });
+    console.error('[auth] protect crashed:', error);
+    return res.status(401).json({ message: 'Not authorized, token failed', code: 'auth-crash' });
   }
 };
 
-// Role-based access control
 export const requireRole = (...roles) => {
   return (req, res, next) => {
-    if (!req.user) {
-      return res.status(401).json({ message: 'Not authorized' });
+    if (!req.userRole) {
+      return res.status(403).json({ message: 'Role context missing. Use membership-based middleware.' });
     }
-    if (!roles.includes(req.user.role)) {
+    if (!roles.includes(req.userRole)) {
       return res.status(403).json({ message: `Access denied. Requires role: ${roles.join(' or ')}` });
     }
     next();

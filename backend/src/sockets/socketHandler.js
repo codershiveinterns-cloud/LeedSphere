@@ -1,17 +1,15 @@
-import jwt from 'jsonwebtoken';
 import Message from '../models/Message.js';
 import DirectMessage from '../models/DirectMessage.js';
 import Conversation from '../models/Conversation.js';
-import User from '../models/User.js';
 import { registerCallHandlers } from './callHandler.js';
+import { verifyFirebaseTokenAndGetUser } from '../services/firebaseUser.js';
 
 export const handleSockets = (io) => {
   io.use(async (socket, next) => {
     try {
       const token = socket.handshake.auth?.token || socket.handshake.query?.token;
       if (token) {
-        const decoded = jwt.verify(token, process.env.JWT_SECRET);
-        const user = await User.findById(decoded.id).select('-password');
+        const { user } = await verifyFirebaseTokenAndGetUser(token);
         if (user) socket.user = user;
       }
     } catch (err) { /* continue without auth */ }
@@ -28,7 +26,7 @@ export const handleSockets = (io) => {
      * Lazy identity resolver. Reading `socket.user` directly on every event
      * (instead of relying on the connection-time snapshot) means a token
      * that arrived late, was rotated, or failed initial verification can
-     * still be picked up by re-running JWT verify on the handshake auth.
+     * still be picked up by re-verifying the Firebase token from handshake auth.
      *
      * Closure capture was the root cause of "Anonymous" senders and
      * "Not authenticated" call errors persisting across an entire
@@ -39,8 +37,7 @@ export const handleSockets = (io) => {
         const token = socket.handshake.auth?.token || socket.handshake.query?.token;
         if (token) {
           try {
-            const decoded = jwt.verify(token, process.env.JWT_SECRET);
-            const u = await User.findById(decoded.id).select('-password');
+            const { user: u } = await verifyFirebaseTokenAndGetUser(token);
             if (u) {
               socket.user = u;
               // Refresh the connection-scope vars so handlers that

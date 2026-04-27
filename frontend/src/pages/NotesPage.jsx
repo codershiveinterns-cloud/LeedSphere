@@ -56,9 +56,15 @@ const NotesPage = () => {
 
   const teamId = activeTeam?._id || teams[0]?._id;
 
+  // Re-fetch whenever the team changes. Clear stale notes synchronously
+  // first so the user never sees the previous team's list while the new
+  // request is in flight — that flash + delayed update was why notes
+  // appeared "only after refresh" in some flows.
   useEffect(() => {
-    if (teamId) fetchNotes(teamId);
-  }, [teamId]);
+    if (!teamId) return;
+    useAppStore.setState({ notes: [] });
+    fetchNotes(teamId);
+  }, [teamId, fetchNotes]);
 
   const rootNotes = notes.filter(n => !n.parentId);
   const filtered = search.trim()

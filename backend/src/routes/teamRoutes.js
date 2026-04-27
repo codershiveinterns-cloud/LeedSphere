@@ -5,30 +5,28 @@ import {
   getMyTeams, getTeamWithMyRole,
 } from '../controllers/teamController.js';
 import { protect } from '../middleware/auth.js';
+import { resolveTeamRole, requireTeamRole } from '../middleware/teamRole.js';
+import { authorizeRoles } from '../middleware/authorizeRoles.js';
 
 const router = express.Router();
 
-// IMPORTANT: specific paths must be declared BEFORE the generic /:workspaceId
-// catch-all (kept for backward compatibility), otherwise Express will route
-// "my" / "merge" into getTeamsByWorkspace and query with them as workspace ids.
-
-router.post('/', protect, createTeam);
+router.post('/', protect, authorizeRoles('admin', 'manager'), createTeam);
 router.get('/', protect, getTeams);
 
-// My memberships + refresh-safety verification
 router.get('/my', protect, getMyTeams);
 router.get('/:teamId/me', protect, getTeamWithMyRole);
 
 router.post('/merge', protect, mergeTeams);
 router.get('/detail/:id', protect, getTeamById);
 
-router.put('/:id', protect, updateTeam);
-router.delete('/:id', protect, deleteTeam);
-router.post('/:id/members', protect, addMember);
-router.put('/:id/members/:userId', protect, updateMember);
-router.delete('/:id/members/:userId', protect, removeMember);
+const teamScopedById = resolveTeamRole({ required: true });
 
-// Generic catch-all — MUST stay last.
-router.get('/:workspaceId', protect, getTeamsByWorkspace);
+router.put('/:id', protect, teamScopedById, requireTeamRole('admin'), updateTeam);
+router.delete('/:id', protect, teamScopedById, requireTeamRole('admin'), deleteTeam);
+router.post('/:id/members', protect, teamScopedById, requireTeamRole('admin'), addMember);
+router.put('/:id/members/:userId', protect, teamScopedById, requireTeamRole('admin'), updateMember);
+router.delete('/:id/members/:userId', protect, teamScopedById, requireTeamRole('admin'), removeMember);
+
+router.get('/:workspaceId', protect, authorizeRoles('admin', 'manager', 'member'), getTeamsByWorkspace);
 
 export default router;

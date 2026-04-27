@@ -53,6 +53,10 @@ const useAppStore = create((set, get) => ({
     teamActivity: {},
     notifications: [],
     pendingInvites: [],
+    // Notes — without these, switching team/user kept the previous team's
+    // notes visible in the sidebar until a hard refresh.
+    notes: [],
+    activeNote: null,
     // Thread / DM transient state
     activeThread: null,
     threadReplies: [],
@@ -69,7 +73,7 @@ const useAppStore = create((set, get) => ({
     if (get()._fetchingWorkspaces) return;
     set({ _fetchingWorkspaces: true });
     try {
-      const res = await api.get('/workspaces');
+      const res = await api.get('/my-workspaces');
       const workspaces = res.data || [];
       set({ workspaces });
       // Auto-select first workspace ONLY if none is active
@@ -103,7 +107,7 @@ const useAppStore = create((set, get) => ({
       // matching currentTeam.workspaceId.
       let workspaces = get().workspaces;
       if (!workspaces?.length) {
-        const res = await api.get('/workspaces');
+        const res = await api.get('/my-workspaces');
         workspaces = res.data || [];
         set({ workspaces });
       }

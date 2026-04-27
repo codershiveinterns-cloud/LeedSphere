@@ -15,13 +15,17 @@ import { findUserTeamMembership } from '../services/teamMember.js';
 
 const pickTeamId = (req) => {
   // Headers are lowercased by Node; accept a few common spellings.
+  // Order matters: explicit URL params first (so PUT /teams/:id/members/...
+  // checks that team, not the active-team header), then body, then header.
   const h = req.headers || {};
   return (
+    req.params?.teamId ||
+    req.params?.id ||         // most team mutation routes use :id
+    req.body?.teamId ||
+    req.query?.teamId ||
     h['x-team-id'] ||
     h['teamid'] ||
     h['team-id'] ||
-    req.query?.teamId ||
-    req.body?.teamId ||
     null
   );
 };
@@ -44,6 +48,7 @@ export const resolveTeamRole = ({ required = false } = {}) => async (req, res, n
 
     req.teamId = String(teamId);
     req.teamRole = membership.role;
+    req.userRole = membership.role;
     req.teamMembership = membership;
     return next();
   } catch (err) {

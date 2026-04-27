@@ -26,10 +26,9 @@
  *   call:error          { message }
  */
 
-import jwt from 'jsonwebtoken';
 import Channel from '../models/Channel.js';
 import Team from '../models/Team.js';
-import User from '../models/User.js';
+import { verifyFirebaseTokenAndGetUser } from '../services/firebaseUser.js';
 
 // Module-level in-memory state. Keyed by channelId.
 // callRooms: Map<channelId, Map<socketId, { userId, name, avatar }>>
@@ -77,22 +76,21 @@ export const registerCallHandlers = (io, socket) => {
    *
    * The previous version captured `socket.user` once when the connection
    * handler ran — if the io.use middleware silently failed to verify the
-   * JWT (expired token, race during page-load, etc.), `socket.user` was
+   * token verification (expired token, race during page-load, etc.), `socket.user` was
    * never populated and every subsequent `call:join` emitted
    * "Not authenticated" for the lifetime of the connection.
    *
    * Reading the auth token from `socket.handshake.auth` per event lets us
    * recover from a bad initial handshake without forcing the client to
    * reconnect. Successful re-auth caches the user back onto the socket
-   * so future events skip the JWT verify.
+   * so future events skip token verification.
    */
   const resolveCaller = async () => {
     if (socket.user) return socket.user;
     const token = socket.handshake.auth?.token || socket.handshake.query?.token;
     if (!token) return null;
     try {
-      const decoded = jwt.verify(token, process.env.JWT_SECRET);
-      const user = await User.findById(decoded.id).select('-password');
+      const { user } = await verifyFirebaseTokenAndGetUser(token);
       if (user) {
         socket.user = user;
         return user;

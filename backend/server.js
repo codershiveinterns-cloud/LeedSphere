@@ -6,6 +6,7 @@ import { createServer } from 'http';
 import { Server } from 'socket.io';
 import connectDB from './src/config/db.js';
 import { errorHandler } from './src/middleware/errorHandler.js';
+import { protect } from './src/middleware/auth.js';
 
 // Route imports
 import authRoutes from './src/routes/authRoutes.js';
@@ -24,12 +25,12 @@ import notificationRoutes from './src/routes/notificationRoutes.js';
 import inviteRoutes from './src/routes/inviteRoutes.js';
 import analyticsRoutes from './src/routes/analyticsRoutes.js';
 import searchRoutes from './src/routes/searchRoutes.js';
+import { getMyWorkspaces } from './src/controllers/workspaceController.js';
 
 import { handleSockets } from './src/sockets/socketHandler.js';
 
 dotenv.config();
 
-// Connect to MongoDB
 connectDB();
 
 const app = express();
@@ -51,6 +52,7 @@ app.use(cookieParser());
 // ===== API Routes =====
 app.use('/api/auth', authRoutes);
 app.use('/api/workspaces', workspaceRoutes);
+app.get('/api/my-workspaces', protect, getMyWorkspaces);
 app.use('/api/channels', channelRoutes);
 app.use('/api/messages', messageRoutes);
 app.use('/api/teams', teamRoutes);
@@ -91,6 +93,7 @@ app.get('/', (req, res) => {
       activity: '/api/activity',
       notifications: '/api/notifications',
       workspaces: '/api/workspaces',
+      myWorkspaces: '/api/my-workspaces',
       projects: '/api/projects',
       tasks: '/api/tasks',
       roles: '/api/roles',

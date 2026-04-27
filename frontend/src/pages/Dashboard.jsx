@@ -1,6 +1,6 @@
 import { useEffect, useState, useRef } from 'react';
 import { useNavigate, Outlet } from 'react-router-dom';
-import useAuthStore from '../store/useAuthStore';
+import useFirebaseAuthStore from '../store/useFirebaseAuthStore';
 import useAppStore from '../store/useAppStore';
 import useCurrentTeamStore from '../store/useCurrentTeamStore';
 import useSearchStore from '../store/useSearchStore';
@@ -15,12 +15,24 @@ import toast from 'react-hot-toast';
 import { Mail, Check, X } from 'lucide-react';
 
 const InviteBanner = () => {
-  const { pendingInvites, fetchPendingInvites, acceptInvite, declineInvite } = useAppStore();
+  // Select fields/actions one at a time. Zustand actions are stable refs,
+  // but `useStore()` (no selector) returns a new object every render, which
+  // re-renders this banner on every unrelated store mutation. Selectors
+  // also keep the useEffect dep array stable.
+  const pendingInvites = useAppStore((s) => s.pendingInvites);
+  const fetchPendingInvites = useAppStore((s) => s.fetchPendingInvites);
+  const acceptInvite = useAppStore((s) => s.acceptInvite);
+  const declineInvite = useAppStore((s) => s.declineInvite);
   const [processing, setProcessing] = useState(null);
 
+  // Mount-only fetch. Empty dep array on purpose — fetchPendingInvites is
+  // a stable zustand action ref, but listing it adds noise without changing
+  // behaviour, and any future store-replacement would silently retrigger.
   useEffect(() => {
+    console.debug('[InviteBanner] effect: fetching pending invites (once)');
     fetchPendingInvites();
-  }, [fetchPendingInvites]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   if (!pendingInvites || pendingInvites.length === 0) return null;
 
@@ -84,7 +96,13 @@ const InviteBanner = () => {
 };
 
 const Dashboard = () => {
-  const { user } = useAuthStore();
+  // Use the Firebase user — the legacy JWT useAuthStore was returning null
+  // post-migration, which caused this effect to navigate('/login') while
+  // /login navigated back to /dashboard, producing the update-depth loop.
+  // RequireFirebaseAuth is also above this route so by the time Dashboard
+  // mounts, currentUser is guaranteed non-null and verified — the !user
+  // navigate below is now defense-in-depth, not the primary gate.
+  const user = useFirebaseAuthStore((s) => s.currentUser);
   const navigate = useNavigate();
   const currentTeam = useCurrentTeamStore((s) => s.currentTeam);
   // Derived, per-team role. Defaults to the least-privileged 'member' when
@@ -93,22 +111,32 @@ const Dashboard = () => {
   const [isRightPanelOpen, setIsRightPanelOpen] = useState(false);
   const hasFetched = useRef(false);
 
+  console.debug('[Dashboard] render', { hasUser: Boolean(user), uid: user?.uid });
+
+  // One-time bootstrap. `hasFetched` ref makes this idempotent against
+  // React 18 StrictMode's double-mount. We deliberately read user.uid (a
+  // primitive) for the dep so the effect doesn't refire when Firebase hands
+  // us a new User object reference for the same identity (token refresh).
+  const uid = user?.uid;
   useEffect(() => {
-    if (!user) {
-      navigate('/login');
+    console.debug('[Dashboard] bootstrap effect run', { uid });
+    if (!uid) {
+      // Should never happen because RequireFirebaseAuth gates this route,
+      // but kick to /login if it does instead of rendering broken UI.
+      navigate('/login', { replace: true });
       return;
     }
-    if (!hasFetched.current) {
-      hasFetched.current = true;
-      // Workspaces + teams are loaded by RequireTeam's bootstrapAppData().
-      // Zero-team users (onboarding path) still need them, so fetch defensively
-      // — it's a no-op when already populated.
-      if (!useAppStore.getState().workspaces.length) {
-        useAppStore.getState().fetchWorkspaces();
-      }
-      useAppStore.getState().fetchNotifications();
+    if (hasFetched.current) return;
+    hasFetched.current = true;
+
+    // Workspaces + teams are loaded by RequireTeam's bootstrapAppData().
+    // Zero-team users (onboarding path) still need them, so fetch defensively
+    // — it's a no-op when already populated.
+    if (!useAppStore.getState().workspaces.length) {
+      useAppStore.getState().fetchWorkspaces();
     }
-  }, [user, navigate]);
+    useAppStore.getState().fetchNotifications();
+  }, [uid, navigate]);
 
   // Global Ctrl/Cmd+K to open search
   useEffect(() => {

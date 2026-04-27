@@ -3,6 +3,16 @@ import Activity from '../models/Activity.js';
 import { findUserTeams, findUserTeamMembership } from '../services/teamMember.js';
 import { ensureWorkspaceMember } from './workspaceController.js';
 
+const TEAM_ROLE_RANK = { member: 1, manager: 2, admin: 3 };
+const normalizeTeamRole = (role, fallback = 'member') => (
+  ['admin', 'manager', 'member'].includes(role) ? role : fallback
+);
+const maxTeamRole = (a, b) => (
+  (TEAM_ROLE_RANK[normalizeTeamRole(a)] || 1) >= (TEAM_ROLE_RANK[normalizeTeamRole(b)] || 1)
+    ? normalizeTeamRole(a)
+    : normalizeTeamRole(b)
+);
+
 // POST /api/teams
 export const createTeam = async (req, res) => {
   try {
@@ -19,8 +29,6 @@ export const createTeam = async (req, res) => {
       members: [{ userId: req.user._id, role: 'admin' }],
     });
 
-    // Make sure the team creator is also tracked as a workspace member so
-    // the workspace shows up in their /api/workspaces list.
     await ensureWorkspaceMember(workspaceId, req.user._id, 'member');
 
     await Activity.create({
@@ -42,7 +50,6 @@ export const getTeams = async (req, res) => {
     const { workspaceId } = req.query;
     const filter = {};
     if (workspaceId) filter.workspaceId = workspaceId;
-    // Only return teams the user is a member of
     filter['members.userId'] = req.user._id;
 
     const teams = await Team.find(filter).populate('members.userId', 'name email avatar');
@@ -53,8 +60,6 @@ export const getTeams = async (req, res) => {
 };
 
 // GET /api/teams/:workspaceId
-// Returns ONLY teams in this workspace where the caller is a team member.
-// Previously this leaked every team in the workspace — fixed.
 export const getTeamsByWorkspace = async (req, res) => {
   try {
     const teams = await Team.find({
@@ -79,9 +84,6 @@ export const getTeamById = async (req, res) => {
 };
 
 // GET /api/teams/my
-// Returns the caller's TeamMember records with populated team + workspace.
-// Used right after login to drive 0/1/N onboarding, and as the source for
-// the team switcher.
 export const getMyTeams = async (req, res) => {
   try {
     const memberships = await findUserTeams(req.user._id);
@@ -92,9 +94,6 @@ export const getMyTeams = async (req, res) => {
 };
 
 // GET /api/teams/:teamId/me
-// Refresh-safety endpoint. Verifies the caller is still a member of the team
-// in localStorage and returns { team, role }. 403 when the membership is gone
-// so the frontend can drop the stale entry and route back to team selection.
 export const getTeamWithMyRole = async (req, res) => {
   try {
     const membership = await findUserTeamMembership(req.user._id, req.params.teamId);
@@ -162,11 +161,14 @@ export const addMember = async (req, res) => {
     const team = await Team.findById(req.params.id);
     if (!team) return res.status(404).json({ message: 'Team not found' });
 
-    const alreadyMember = team.members.some(m => m.userId.toString() === userId);
+    const alreadyMember = team.members.some((m) => m.userId.toString() === String(userId));
     if (alreadyMember) return res.status(400).json({ message: 'User is already a member' });
 
-    team.members.push({ userId, role: role || 'member', designation: designation || '' });
+    const nextRole = normalizeTeamRole(role, 'member');
+    team.members.push({ userId, role: nextRole, designation: designation || '' });
     await team.save();
+
+    await ensureWorkspaceMember(team.workspaceId, userId, nextRole);
 
     await Activity.create({ userId: req.user._id, action: `Added a member to "${team.name}"`, teamId: team._id });
 
@@ -177,19 +179,23 @@ export const addMember = async (req, res) => {
   }
 };
 
-// PUT /api/teams/:id/members/:userId — update role or designation
+// PUT /api/teams/:id/members/:userId
 export const updateMember = async (req, res) => {
   try {
     const { role, designation } = req.body;
     const team = await Team.findById(req.params.id);
     if (!team) return res.status(404).json({ message: 'Team not found' });
 
-    const member = team.members.find(m => m.userId.toString() === req.params.userId);
+    const member = team.members.find((m) => m.userId.toString() === req.params.userId);
     if (!member) return res.status(404).json({ message: 'Member not found' });
 
-    if (role) member.role = role;
+    if (role) member.role = normalizeTeamRole(role, member.role);
     if (designation !== undefined) member.designation = designation;
     await team.save();
+
+    if (role) {
+      await ensureWorkspaceMember(team.workspaceId, req.params.userId, member.role);
+    }
 
     await Activity.create({
       userId: req.user._id,
@@ -210,7 +216,7 @@ export const removeMember = async (req, res) => {
     const team = await Team.findById(req.params.id);
     if (!team) return res.status(404).json({ message: 'Team not found' });
 
-    team.members = team.members.filter(m => m.userId.toString() !== req.params.userId);
+    team.members = team.members.filter((m) => m.userId.toString() !== req.params.userId);
     await team.save();
 
     await Activity.create({ userId: req.user._id, action: `Removed a member from "${team.name}"`, teamId: team._id });
@@ -230,15 +236,44 @@ export const mergeTeams = async (req, res) => {
     const source = await Team.findById(sourceTeamId);
     if (!target || !source) return res.status(404).json({ message: 'Team not found' });
 
-    // Combine members, deduplicate by userId
-    const existingIds = new Set(target.members.map(m => m.userId.toString()));
-    for (const m of source.members) {
-      if (!existingIds.has(m.userId.toString())) {
-        target.members.push(m);
+    const me = String(req.user._id);
+    const targetRole = target.members.find((m) => String(m.userId) === me)?.role;
+    const sourceRole = source.members.find((m) => String(m.userId) === me)?.role;
+    if (targetRole !== 'admin' || sourceRole !== 'admin') {
+      return res.status(403).json({ message: 'Only team admins can merge teams' });
+    }
+
+    const merged = new Map();
+    for (const m of target.members || []) {
+      merged.set(String(m.userId), {
+        userId: m.userId,
+        role: normalizeTeamRole(m.role, 'member'),
+        designation: m.designation || '',
+        joinedAt: m.joinedAt || new Date(),
+      });
+    }
+    for (const m of source.members || []) {
+      const uid = String(m.userId);
+      const existing = merged.get(uid);
+      const incomingRole = normalizeTeamRole(m.role, 'member');
+      if (!existing) {
+        merged.set(uid, {
+          userId: m.userId,
+          role: incomingRole,
+          designation: m.designation || '',
+          joinedAt: m.joinedAt || new Date(),
+        });
+      } else {
+        existing.role = maxTeamRole(existing.role, incomingRole);
+        if (!existing.designation && m.designation) existing.designation = m.designation;
       }
     }
+
+    target.members = Array.from(merged.values());
     await target.save();
     await Team.findByIdAndDelete(sourceTeamId);
+
+    await Promise.all(target.members.map((m) => ensureWorkspaceMember(target.workspaceId, m.userId, m.role)));
 
     await Activity.create({ userId: req.user._id, action: `Merged "${source.name}" into "${target.name}"`, teamId: target._id });
 

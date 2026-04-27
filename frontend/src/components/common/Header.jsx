@@ -1,17 +1,19 @@
 import { LogOut, Search, Bell, Plus, Users, Hash, FileText, MessageSquare, CheckSquare, Sun, Moon } from 'lucide-react';
 import { useState, useRef, useEffect, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
-import useAuthStore from '../../store/useAuthStore';
+import useFirebaseAuthStore from '../../store/useFirebaseAuthStore';
 import useAppStore from '../../store/useAppStore';
 import useThemeStore from '../../store/useThemeStore';
 import useSearchStore from '../../store/useSearchStore';
 import useCurrentTeamStore from '../../store/useCurrentTeamStore';
+import { logOut as firebaseLogOut } from '../../services/authService';
 import Modal from './Modal';
 import CreateChannelForm from '../channel/CreateChannelForm';
 import toast from 'react-hot-toast';
 
 const Header = () => {
-  const { user, logout } = useAuthStore();
+  // Identity from Firebase. Display fields come from displayName/email.
+  const user = useFirebaseAuthStore((s) => s.currentUser);
   const {
     activeWorkspace, uiStates, setUiState,
     notifications, markNotificationRead, markAllNotificationsRead, getUnreadCount,
@@ -43,6 +45,36 @@ const Header = () => {
     document.addEventListener('mousedown', handleClickOutside);
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, [setUiState]);
+
+  /**
+   * Sign out cleanly across every layer:
+   *   1. Firebase signOut → onAuthStateChanged fires with null → the auth
+   *      store sets currentUser=null, RequireFirebaseAuth will redirect
+   *      anyone still on a protected route to /login.
+   *   2. Reset team + app stores so the next login doesn't see the previous
+   *      user's currentTeam / workspaces / notifications cached in memory.
+   *   3. Wipe a few localStorage keys that aren't owned by stores (lastActive
+   *      team hint, starred lists, recents). We do NOT call localStorage.clear()
+   *      because that would also nuke theme preferences.
+   *   4. navigate('/login') — defensive, since the route guard above will
+   *      already do this once Firebase fires its null event.
+   */
+  const handleLogout = async () => {
+    try {
+      await firebaseLogOut();
+    } catch (err) {
+      console.warn('[header] firebase signOut failed:', err?.message || err);
+    }
+    try { useCurrentTeamStore.getState().clear(); } catch { /* ignore */ }
+    try { useAppStore.getState().reset(); } catch { /* ignore */ }
+    try {
+      localStorage.removeItem('lastActiveTeamId');
+      localStorage.removeItem('starredTeams');
+      localStorage.removeItem('recentItems');
+      localStorage.removeItem('user'); // legacy JWT blob, in case it lingers
+    } catch { /* ignore */ }
+    navigate('/login', { replace: true });
+  };
 
   const handleCreateTeam = async (e) => {
     e.preventDefault();
@@ -211,11 +243,11 @@ const Header = () => {
 
           <div className="flex items-center gap-3 pl-4 border-l border-slate-200 dark:border-gray-800">
             <div className="w-7 h-7 rounded-full bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center text-xs font-bold text-white shadow-sm ring-2 ring-white dark:ring-[#0d1117]">
-              {user?.name?.charAt(0).toUpperCase()}
+              {(user?.displayName || user?.email || '?').charAt(0).toUpperCase()}
             </div>
-            <span className="text-sm font-medium text-slate-700 dark:text-gray-200 hidden md:block">{user?.name}</span>
+            <span className="text-sm font-medium text-slate-700 dark:text-gray-200 hidden md:block">{user?.displayName || user?.email}</span>
           </div>
-          <button onClick={logout} className="flex items-center gap-2 text-sm font-medium text-slate-500 dark:text-gray-400 hover:text-red-500 dark:hover:text-red-400 transition-colors ml-2 active:scale-90"><LogOut size={16} /></button>
+          <button onClick={handleLogout} title="Sign out" className="flex items-center gap-2 text-sm font-medium text-slate-500 dark:text-gray-400 hover:text-red-500 dark:hover:text-red-400 transition-colors ml-2 active:scale-90"><LogOut size={16} /></button>
         </div>
       </header>
 

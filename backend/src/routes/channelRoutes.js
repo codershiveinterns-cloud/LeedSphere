@@ -9,25 +9,27 @@ import {
   deleteChannel,
 } from '../controllers/channelController.js';
 import { protect } from '../middleware/auth.js';
+import { resolveTeamRole, requireTeamRole } from '../middleware/teamRole.js';
 
 const router = express.Router();
 
-// Create
-router.post('/', protect, createChannel);
-router.post('/create', protect, createChannel); // alias per spec
+const teamScoped = resolveTeamRole({ required: true });
 
-// Membership actions
-router.post('/join', protect, joinChannel);
-router.post('/leave', protect, leaveChannel);
+// Channel matrix:
+//   admin, manager → create
+//   admin          → delete
+//   any member     → join / leave / read
+router.post('/', protect, teamScoped, requireTeamRole('admin', 'manager'), createChannel);
+router.post('/create', protect, teamScoped, requireTeamRole('admin', 'manager'), createChannel);
 
-// Reads
-router.get('/team/:teamId', protect, getChannelsByTeam);
-router.get('/:id/members', protect, getChannelMembers);
+router.post('/join', protect, teamScoped, joinChannel);
+router.post('/leave', protect, teamScoped, leaveChannel);
 
-// Delete
-router.delete('/:id', protect, deleteChannel);
+router.get('/team/:teamId', protect, teamScoped, getChannelsByTeam);
+router.get('/:id/members', protect, teamScoped, getChannelMembers);
 
-// Backward compat: fetch by workspace (kept for existing callers)
+router.delete('/:id', protect, teamScoped, requireTeamRole('admin'), deleteChannel);
+
 router.get('/:workspaceId', protect, getChannelsByWorkspace);
 
 export default router;
