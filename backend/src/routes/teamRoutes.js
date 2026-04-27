@@ -19,7 +19,11 @@ router.get('/:teamId/me', protect, getTeamWithMyRole);
 router.post('/merge', protect, mergeTeams);
 router.get('/detail/:id', protect, getTeamById);
 
-const teamScopedById = resolveTeamRole({ required: true });
+// Team mutation routes encode the team id in the URL as `:id`, so resolve
+// against that param (not the active-team header — admins managing a
+// different team than the one they're sitting in would otherwise be
+// authorized against the wrong team).
+const teamScopedById = resolveTeamRole({ required: true, paramName: 'id' });
 
 router.put('/:id', protect, teamScopedById, requireTeamRole('admin'), updateTeam);
 router.delete('/:id', protect, teamScopedById, requireTeamRole('admin'), deleteTeam);

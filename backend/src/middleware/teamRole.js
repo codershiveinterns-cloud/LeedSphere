@@ -13,14 +13,23 @@
  */
 import { findUserTeamMembership } from '../services/teamMember.js';
 
-const pickTeamId = (req) => {
+const pickTeamId = (req, { paramName } = {}) => {
   // Headers are lowercased by Node; accept a few common spellings.
-  // Order matters: explicit URL params first (so PUT /teams/:id/members/...
-  // checks that team, not the active-team header), then body, then header.
+  //
+  // Source priority:
+  //   1. The explicit param name passed by the route (e.g. 'id' for team
+  //      routes whose URL is /:id). Only the route knows whether its :id
+  //      is a team id — guessing was wrong (e.g. /channels/:id/members has
+  //      a channel id there, not a team id).
+  //   2. req.params.teamId (only if the route declared :teamId).
+  //   3. body / query.
+  //   4. X-Team-Id header (the active team the frontend sends with every
+  //      request; correct fallback when the route doesn't carry the team
+  //      in its URL).
   const h = req.headers || {};
   return (
+    (paramName && req.params?.[paramName]) ||
     req.params?.teamId ||
-    req.params?.id ||         // most team mutation routes use :id
     req.body?.teamId ||
     req.query?.teamId ||
     h['x-team-id'] ||
@@ -30,11 +39,16 @@ const pickTeamId = (req) => {
   );
 };
 
-// Attaches req.teamId / req.teamRole. Returns 400 if the header is missing
-// when the caller requires it — pass `{ required: true }` to enforce.
-export const resolveTeamRole = ({ required = false } = {}) => async (req, res, next) => {
+// Attaches req.teamId / req.teamRole. Returns 400 if the team id is missing
+// when the caller requires it — pass `{ required: true }`.
+//
+// `paramName` opts in to using a URL param as the source of the team id (for
+// routes like PUT /teams/:id/... where the URL itself names the team). Omit
+// it on routes where :id is some other resource (channel, project) and the
+// active-team header is the right source.
+export const resolveTeamRole = ({ required = false, paramName } = {}) => async (req, res, next) => {
   try {
-    const teamId = pickTeamId(req);
+    const teamId = pickTeamId(req, { paramName });
     if (!teamId) {
       if (required) return res.status(400).json({ message: 'teamId header required' });
       return next();
