@@ -1,9 +1,14 @@
 import axios from 'axios';
 import { onAuthStateChanged } from 'firebase/auth';
 import { auth } from '../firebase';
+import { API_ROOT } from '../config/api';
 
+/**
+ * Shared axios instance. baseURL is the API root resolved from VITE_API_URL
+ * at build time — see src/config/api.js. Never hardcode hosts here.
+ */
 const api = axios.create({
-  baseURL: 'http://localhost:5005/api',
+  baseURL: API_ROOT,
   withCredentials: true,
 });
 

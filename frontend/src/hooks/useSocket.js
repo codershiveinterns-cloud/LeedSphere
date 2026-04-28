@@ -2,6 +2,7 @@ import { useEffect } from 'react';
 import { io } from 'socket.io-client';
 import { onAuthStateChanged } from 'firebase/auth';
 import { auth } from '../firebase';
+import { SOCKET_URL } from '../config/api';
 import useAppStore from '../store/useAppStore';
 
 const waitForFirebaseUser = async (timeoutMs = 3000) => {
@@ -54,8 +55,18 @@ const getSocketToken = async () => {
   }
 };
 
-export const socket = io('http://localhost:5005', {
+/**
+ * Socket.IO client. Same origin as the REST API (resolved from VITE_API_URL).
+ *
+ * `transports: ['websocket']` skips the long-poll fallback — Render and most
+ * modern hosts handle pure ws fine, and we avoid the noisy polling probes
+ * on the network tab. If you ever need the fallback (corp proxies that
+ * block ws), drop the `transports` line.
+ */
+export const socket = io(SOCKET_URL, {
   auth: async (cb) => cb({ token: await getSocketToken() }),
+  transports: ['websocket'],
+  withCredentials: true,
   autoConnect: true,
 });
 
