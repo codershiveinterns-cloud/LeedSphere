@@ -115,11 +115,36 @@ const Header = ({ onMenuClick }) => {
     return out;
   }, [notifications]);
 
+  // Tab filters — All / Mentions / Tasks. The "Tasks" tab also includes
+  // task-status and task-due so all three task notification types live in
+  // one bucket.
   const filteredNotifs = activeNotifTab === 'All'
     ? notifications
     : activeNotifTab === 'Mentions'
       ? notifications.filter(n => n.type === 'mention')
-      : notifications.filter(n => n.type === 'task');
+      : notifications.filter(n => ['task', 'task-status', 'task-due'].includes(n.type));
+
+  /**
+   * Handle bell-row click: mark the notification read, close the dropdown,
+   * and navigate to its redirectUrl. Falls back to a sensible default when
+   * the backend didn't supply one (older notifications written before the
+   * redirectUrl column existed).
+   */
+  const handleNotificationClick = (notif) => {
+    if (!notif?._id) return;
+    markNotificationRead(notif._id);
+    setUiState('isNotificationsOpen', false);
+
+    // Prefer explicit redirectUrl; fall back to derived URL based on type.
+    let url = notif.redirectUrl;
+    if (!url) {
+      if (notif.channelId) url = `/dashboard/channel/${notif.channelId}`;
+      else if (notif.projectId && notif.entityId) url = `/dashboard/projects?project=${notif.projectId}&task=${notif.entityId}`;
+      else if (notif.projectId) url = `/dashboard/projects?project=${notif.projectId}`;
+      else if (notif.type === 'event' || notif.type === 'event-reminder') url = '/dashboard/calendar';
+    }
+    if (url) navigate(url);
+  };
 
   return (
     <>
@@ -237,10 +262,18 @@ const Header = ({ onMenuClick }) => {
                   {filteredNotifs.length === 0 ? (
                     <div className="py-8 text-center"><Bell size={24} className="text-slate-300 dark:text-gray-700 mx-auto mb-2" /><p className="text-slate-500 dark:text-gray-500 text-sm">No notifications</p></div>
                   ) : filteredNotifs.map(notif => (
-                    <button key={notif._id} onClick={() => markNotificationRead(notif._id)}
+                    <button key={notif._id} onClick={() => handleNotificationClick(notif)}
                       className={`flex gap-3 p-3 rounded-lg cursor-pointer text-left w-full transition-colors ${notif.read ? 'hover:bg-slate-100 dark:hover:bg-[#1c212b]' : 'bg-indigo-50 dark:bg-indigo-500/5 hover:bg-indigo-100 dark:hover:bg-indigo-500/10 border border-indigo-100 dark:border-indigo-500/10'}`}>
-                      <div className={`w-8 h-8 rounded-full flex items-center justify-center text-xs mt-0.5 shrink-0 ${notif.type === 'mention' ? 'bg-emerald-100 text-emerald-600 dark:bg-emerald-500/20 dark:text-emerald-400' : notif.type === 'task' ? 'bg-purple-100 text-purple-600 dark:bg-purple-500/20 dark:text-purple-400' : 'bg-indigo-100 text-indigo-600 dark:bg-indigo-500/20 dark:text-indigo-400'}`}>
-                        {notif.type === 'mention' ? <MessageSquare size={14} /> : notif.type === 'task' ? <CheckSquare size={14} /> : <Users size={14} />}
+                      <div className={`w-8 h-8 rounded-full flex items-center justify-center text-xs mt-0.5 shrink-0 ${
+                        notif.type === 'mention' ? 'bg-emerald-100 text-emerald-600 dark:bg-emerald-500/20 dark:text-emerald-400'
+                        : ['task', 'task-status', 'task-due'].includes(notif.type) ? 'bg-purple-100 text-purple-600 dark:bg-purple-500/20 dark:text-purple-400'
+                        : ['call', 'missed-call'].includes(notif.type) ? 'bg-red-100 text-red-600 dark:bg-red-500/20 dark:text-red-400'
+                        : ['event', 'event-reminder'].includes(notif.type) ? 'bg-amber-100 text-amber-600 dark:bg-amber-500/20 dark:text-amber-400'
+                        : 'bg-indigo-100 text-indigo-600 dark:bg-indigo-500/20 dark:text-indigo-400'
+                      }`}>
+                        {notif.type === 'mention' ? <MessageSquare size={14} />
+                          : ['task', 'task-status', 'task-due'].includes(notif.type) ? <CheckSquare size={14} />
+                          : <Users size={14} />}
                       </div>
                       <div className="flex-1 min-w-0">
                         <p className={`text-sm ${notif.read ? 'text-slate-500 dark:text-gray-400' : 'text-slate-800 dark:text-gray-200'}`}>{notif.content}</p>

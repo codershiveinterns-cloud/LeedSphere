@@ -124,6 +124,21 @@ const useCallStore = create((set, get) => ({
   // Map of channelId → active participant count; populated from call:room-state broadcasts.
   roomStates: {},
 
+  /**
+   * Active "incoming call" payload — set by useNotifications when an
+   * `incoming-call` socket event arrives, cleared on accept / reject /
+   * timeout. Shape: { channelId, channelName, callerUserId, callerName,
+   *                   callerAvatar, startedAt }
+   */
+  incomingCall: null,
+  setIncomingCall: (payload) => set({ incomingCall: payload }),
+  clearIncomingCall: () => {
+    // Stop the looping ring sound if useNotifications stashed one on the store.
+    try { useCallStore._ringAudio?.pause?.(); } catch { /* noop */ }
+    useCallStore._ringAudio = null;
+    set({ incomingCall: null });
+  },
+
   getLocalStream: () => localMediaStream,
 
   /* ---------------- subscribe to room-state broadcasts (always on) ---------------- */

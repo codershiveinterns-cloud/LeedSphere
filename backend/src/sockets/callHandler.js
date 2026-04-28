@@ -29,6 +29,18 @@
 import Channel from '../models/Channel.js';
 import Team from '../models/Team.js';
 import { verifyFirebaseTokenAndGetUser } from '../services/firebaseUser.js';
+import { sendNotification, sendNotificationsToMany } from '../services/notificationService.js';
+
+/**
+ * Track which channel calls are "ringing" — first joiner becomes the caller
+ * and we ring everyone else for ~30s. If the second joiner accepts (joins
+ * the call), the ring stops. Otherwise we mark missed-call for everyone we
+ * rang. Keyed by channelId.
+ *
+ *   ringing: Map<channelId, { callerUserId, callerName, channelName, recipients: string[], timer }>
+ */
+const ringing = new Map();
+const RING_TIMEOUT_MS = 30_000;
 
 // Module-level in-memory state. Keyed by channelId.
 // callRooms: Map<channelId, Map<socketId, { userId, name, avatar }>>
@@ -125,6 +137,9 @@ export const registerCallHandlers = (io, socket) => {
         avatar: meta.avatar,
       }));
 
+      // First joiner is the caller — ring every channel member except them.
+      const wasEmpty = room.size === 0;
+
       // Add joiner to room
       room.set(socket.id, { userId, name, avatar });
       joinedChannels.add(channelId);
@@ -144,8 +159,105 @@ export const registerCallHandlers = (io, socket) => {
       });
 
       broadcastRoomState(io, channelId);
+
+      // -------- Incoming-call ring --------
+      if (wasEmpty) {
+        // Caller starting a fresh call. Compute recipients (channel members
+        // minus the caller) and emit `incoming-call` + persist a `call`
+        // notification each of them. After RING_TIMEOUT_MS, anyone who
+        // hasn't joined → missed-call.
+        try {
+          const team = await Team.findById(channel.teamId).select('members');
+          const teamMemberIds = (team?.members || []).map((m) => String(m.userId));
+          const isPrivate = channel.isPrivate || channel.type === 'private';
+          const allowed = isPrivate
+            ? teamMemberIds.filter((id) => (channel.members || []).some((m) => String(m) === id))
+            : teamMemberIds;
+          const recipients = allowed.filter((id) => id !== userId);
+
+          // Real-time ring (transient — not persisted; the call notification below is)
+          for (const uid of recipients) {
+            io.to(`user_${uid}`).emit('incoming-call', {
+              channelId,
+              channelName: channel.name,
+              callerUserId: userId,
+              callerName: name,
+              callerAvatar: avatar,
+              startedAt: Date.now(),
+            });
+          }
+
+          // Persist a `call` notification (so the bell shows it even if the
+          // user is offline / inactive).
+          await sendNotificationsToMany(io, recipients, {
+            type: 'call',
+            content: `Incoming call from ${name} in #${channel.name}`,
+            channelId,
+            redirectUrl: `/dashboard/channel/${channelId}`,
+            meta: { channelName: channel.name, fromUserId: userId, fromName: name },
+          });
+
+          // Schedule missed-call check.
+          const prev = ringing.get(channelId);
+          if (prev?.timer) clearTimeout(prev.timer);
+          const timer = setTimeout(async () => {
+            const stillThere = callRooms.get(channelId);
+            // Filter: any recipient who never joined the call → missed.
+            const joinedUserIds = new Set(
+              [...(stillThere?.values() || [])].map((m) => String(m.userId))
+            );
+            const missed = recipients.filter((id) => !joinedUserIds.has(id));
+            if (missed.length) {
+              try {
+                await sendNotificationsToMany(io, missed, {
+                  type: 'missed-call',
+                  content: `Missed call from ${name} in #${channel.name}`,
+                  channelId,
+                  redirectUrl: `/dashboard/channel/${channelId}`,
+                  meta: { channelName: channel.name, fromUserId: userId, fromName: name },
+                });
+              } catch (e) { console.warn('[call] missed-call notify failed:', e.message); }
+            }
+            // Tell every recipient's UI to dismiss the ring modal.
+            for (const uid of recipients) {
+              io.to(`user_${uid}`).emit('call:ring-stopped', { channelId });
+            }
+            ringing.delete(channelId);
+          }, RING_TIMEOUT_MS);
+
+          ringing.set(channelId, { callerUserId: userId, callerName: name, channelName: channel.name, recipients, timer });
+        } catch (notifyErr) {
+          console.warn('[call] incoming-call notify failed:', notifyErr.message);
+        }
+      } else {
+        // A second+ user joined — ring is answered. Cancel the missed-call
+        // timer and tell everyone to stop ringing.
+        const r = ringing.get(channelId);
+        if (r) {
+          clearTimeout(r.timer);
+          for (const uid of r.recipients) {
+            io.to(`user_${uid}`).emit('call:ring-stopped', { channelId });
+          }
+          ringing.delete(channelId);
+        }
+      }
     } catch (err) {
       emitError(err.message || 'Failed to join call');
+    }
+  });
+
+  // Explicit reject — recipient declined the ring.
+  socket.on('call:reject', async ({ channelId } = {}) => {
+    if (!channelId) return;
+    const user = await resolveCaller();
+    if (!user) return;
+    const userId = String(user._id);
+    // Tell the caller (if still ringing) that this user rejected.
+    const r = ringing.get(channelId);
+    if (r) {
+      io.to(`user_${r.callerUserId}`).emit('call:rejected', {
+        channelId, byUserId: userId, byName: user.name || 'Guest',
+      });
     }
   });
 

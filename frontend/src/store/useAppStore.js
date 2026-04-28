@@ -687,6 +687,22 @@ const useAppStore = create((set, get) => ({
     return get().notifications.filter(n => !n.read).length;
   },
 
+  /**
+   * Insert a freshly-arrived notification at the top of the bell list.
+   * Used by the real-time `receive-notification` socket listener — see
+   * hooks/useNotifications.js. De-dupes by _id so reconnect-storms don't
+   * stack the same notification twice.
+   */
+  pushNotification: (notif) => {
+    if (!notif?._id) return;
+    const existing = get().notifications;
+    if (existing.some((n) => String(n._id) === String(notif._id))) return;
+    // Cap at 100 in memory — the API returns the latest 50 anyway, so any
+    // older entries the user actually wants are one fetch away.
+    const next = [notif, ...existing].slice(0, 100);
+    set({ notifications: next });
+  },
+
   // =====================
   // UI HELPERS (local only)
   // =====================

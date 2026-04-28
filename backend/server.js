@@ -28,6 +28,8 @@ import searchRoutes from './src/routes/searchRoutes.js';
 import { getMyWorkspaces } from './src/controllers/workspaceController.js';
 
 import { handleSockets } from './src/sockets/socketHandler.js';
+import { setIO } from './src/sockets/io.js';
+import { startReminderCrons } from './src/services/reminderCron.js';
 
 dotenv.config();
 
@@ -138,8 +140,13 @@ app.get('/', (req, res) => {
 // Error handler (must be last)
 app.use(errorHandler);
 
-// Attach Socket Handlers
+// Attach Socket Handlers + expose io to controllers (taskController etc.)
+setIO(io);
 handleSockets(io);
+
+// Background notifications: due-soon tasks, upcoming calendar events.
+// Safe to start unconditionally — internal interval; no external deps.
+startReminderCrons();
 
 const PORT = process.env.PORT || 5000;
 

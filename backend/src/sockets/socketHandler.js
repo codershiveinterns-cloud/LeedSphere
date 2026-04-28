@@ -1,8 +1,53 @@
 import Message from '../models/Message.js';
 import DirectMessage from '../models/DirectMessage.js';
 import Conversation from '../models/Conversation.js';
+import Channel from '../models/Channel.js';
+import Team from '../models/Team.js';
+import User from '../models/User.js';
 import { registerCallHandlers } from './callHandler.js';
 import { verifyFirebaseTokenAndGetUser } from '../services/firebaseUser.js';
+import { sendNotification, sendNotificationsToMany } from '../services/notificationService.js';
+
+/**
+ * Resolve the recipient list for a channel notification: every team member
+ * who can see the channel, minus the sender. Private channels narrow the
+ * list to channel.members.
+ */
+const recipientsForChannel = async (channelId, excludeUserId) => {
+  const channel = await Channel.findById(channelId).select('teamId isPrivate type members');
+  if (!channel) return [];
+  const team = await Team.findById(channel.teamId).select('members');
+  if (!team) return [];
+  const teamMemberIds = (team.members || []).map((m) => String(m.userId));
+  const isPrivate = channel.isPrivate || channel.type === 'private';
+  const allowed = isPrivate
+    ? teamMemberIds.filter((id) => (channel.members || []).some((m) => String(m) === id))
+    : teamMemberIds;
+  return allowed.filter((id) => id !== String(excludeUserId));
+};
+
+/**
+ * Find @-mention targets in a message body. Matches @username and resolves
+ * by the leading part of email or User.name (case-insensitive). Returns
+ * the recipient ids in the same order as the @ tokens, deduplicated.
+ */
+const resolveMentionedUserIds = async (content, candidateRecipientIds) => {
+  if (!content) return [];
+  const tokens = [...content.matchAll(/@([\w.-]+)/g)].map((m) => m[1].toLowerCase());
+  if (!tokens.length) return [];
+  const candidates = await User.find({ _id: { $in: candidateRecipientIds } })
+    .select('_id name email')
+    .lean();
+  const matchedIds = new Set();
+  for (const t of tokens) {
+    for (const u of candidates) {
+      const nameSlug = (u.name || '').toLowerCase().replace(/\s+/g, '');
+      const emailHandle = (u.email || '').split('@')[0].toLowerCase();
+      if (nameSlug === t || emailHandle === t) matchedIds.add(String(u._id));
+    }
+  }
+  return [...matchedIds];
+};
 
 export const handleSockets = (io) => {
   io.use(async (socket, next) => {
@@ -116,6 +161,55 @@ export const handleSockets = (io) => {
 
         if (threadId) {
           io.to(channelId).emit('thread_reply', { threadId, message: populated });
+        }
+
+        // -------- Notifications --------
+        // Channel members (minus sender) get a `message` notification; if
+        // they're @mentioned, they get a `mention` notification *instead*
+        // (mentions are louder than plain messages, so de-dupe).
+        try {
+          const allRecipients = await recipientsForChannel(channelId, userId);
+          const mentionedIds  = await resolveMentionedUserIds(content, allRecipients);
+          const mentionedSet  = new Set(mentionedIds.map(String));
+          const messageRecipients = allRecipients.filter((id) => !mentionedSet.has(String(id)));
+
+          const channelDoc = await Channel.findById(channelId).select('name');
+          const channelName = channelDoc?.name || 'channel';
+          const fromName    = userName || 'Someone';
+
+          // Mentions — always notify, even if viewing the channel.
+          if (mentionedIds.length) {
+            await sendNotificationsToMany(io, mentionedIds, {
+              type: 'mention',
+              content: `${fromName} mentioned you in #${channelName}`,
+              channelId,
+              entityId: newMessage._id,
+              redirectUrl: threadId
+                ? `/dashboard/channel/${channelId}?thread=${threadId}&message=${newMessage._id}`
+                : `/dashboard/channel/${channelId}?message=${newMessage._id}`,
+              meta: { channelName, fromUserId: String(userId), fromName, threadId: threadId || null, preview: String(content).slice(0, 120) },
+            });
+          }
+          // Plain message OR thread reply — frontend suppresses the toast if
+          // the user is currently viewing this channel; the bell entry is
+          // still recorded for history.
+          if (messageRecipients.length) {
+            const isReply = Boolean(threadId);
+            await sendNotificationsToMany(io, messageRecipients, {
+              type: isReply ? 'reply' : 'message',
+              content: isReply
+                ? `${fromName} replied in a thread in #${channelName}`
+                : `New message from ${fromName} in #${channelName}`,
+              channelId,
+              entityId: newMessage._id,
+              redirectUrl: isReply
+                ? `/dashboard/channel/${channelId}?thread=${threadId}&message=${newMessage._id}`
+                : `/dashboard/channel/${channelId}?message=${newMessage._id}`,
+              meta: { channelName, fromUserId: String(userId), fromName, threadId: threadId || null, preview: String(content).slice(0, 120) },
+            });
+          }
+        } catch (notifyErr) {
+          console.warn('[notify] message fan-out failed:', notifyErr.message);
         }
       } catch (error) {
         console.error('send_message error:', error.message);

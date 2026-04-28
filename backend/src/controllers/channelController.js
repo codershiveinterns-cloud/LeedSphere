@@ -1,6 +1,8 @@
 import Channel from '../models/Channel.js';
 import Team from '../models/Team.js';
 import Activity from '../models/Activity.js';
+import { getIO } from '../sockets/io.js';
+import { sendNotificationsToMany, buildRedirect } from '../services/notificationService.js';
 
 /* ---------- helpers ---------- */
 
@@ -88,6 +90,25 @@ export const createChannel = async (req, res) => {
       action: `Created ${resolvedType} channel #${channel.name}`,
       teamId,
     });
+
+    // Notify private-channel members that they've been added (creator excluded).
+    try {
+      const io = getIO();
+      const recipients = channelMembers.filter((id) => String(id) !== String(req.user._id));
+      if (io && privateFlag && recipients.length) {
+        await sendNotificationsToMany(io, recipients, {
+          type: 'channel-add',
+          content: `${req.user.name || 'Someone'} added you to #${channel.name}`,
+          channelId: channel._id,
+          redirectUrl: buildRedirect.channel(channel._id),
+          meta: {
+            channelName: channel.name,
+            fromUserId: String(req.user._id),
+            fromName: req.user.name || 'Someone',
+          },
+        });
+      }
+    } catch (e) { console.warn('[notify] channel-add failed:', e.message); }
 
     res.status(201).json(channel);
   } catch (err) {

@@ -1,5 +1,7 @@
 import Event from '../models/Event.js';
 import Workspace from '../models/Workspace.js';
+import { getIO } from '../sockets/io.js';
+import { sendNotificationsToMany, buildRedirect } from '../services/notificationService.js';
 
 const resolveWorkspaceRole = async (workspaceId, userId) => {
   const workspace = await Workspace.findById(workspaceId).select('members');
@@ -29,6 +31,29 @@ export const createEvent = async (req, res) => {
     const populated = await Event.findById(event._id)
       .populate('createdBy', 'name avatar')
       .populate('assignedTo', 'name avatar');
+
+    // Notify every assignee (except the creator) that they've been added.
+    try {
+      const io = getIO();
+      const recipients = (populated.assignedTo || [])
+        .map((u) => String(u._id || u))
+        .filter((id) => id && id !== String(req.user._id));
+      if (io && recipients.length) {
+        await sendNotificationsToMany(io, recipients, {
+          type: 'event',
+          content: `${req.user.name || 'Someone'} added you to “${populated.title}”`,
+          entityId: populated._id,
+          redirectUrl: buildRedirect.event(populated._id),
+          meta: {
+            eventTitle: populated.title,
+            startDate: populated.startDate,
+            fromUserId: String(req.user._id),
+            fromName: req.user.name || 'Someone',
+          },
+        });
+      }
+    } catch (e) { console.warn('[notify] event-create failed:', e.message); }
+
     res.status(201).json(populated);
   } catch (err) {
     res.status(500).json({ message: err.message });

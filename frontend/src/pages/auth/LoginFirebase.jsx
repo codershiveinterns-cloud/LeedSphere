@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { LogIn, Mail, Lock, ArrowRight, Loader2, MailWarning } from 'lucide-react';
+import { LogIn, Mail, Lock, ArrowRight, Loader2, MailWarning, Eye, EyeOff } from 'lucide-react';
 import { logIn } from '../../services/authService';
 
 /**
@@ -15,6 +15,7 @@ const Login = () => {
   const navigate = useNavigate();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [showPw, setShowPw] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
 
@@ -104,14 +105,23 @@ const Login = () => {
                 <Lock size={18} />
               </div>
               <input
-                type="password"
+                type={showPw ? 'text' : 'password'}
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 autoComplete="current-password"
                 required
-                className="w-full pl-10 pr-4 py-3 bg-white dark:bg-[#0d1117] border border-slate-200 dark:border-gray-800 rounded-xl focus:ring-2 focus:ring-indigo-500/30 focus:border-indigo-500 text-slate-900 dark:text-white placeholder-slate-400 dark:placeholder-gray-500 transition-all outline-none"
+                className="w-full pl-10 pr-10 py-3 bg-white dark:bg-[#0d1117] border border-slate-200 dark:border-gray-800 rounded-xl focus:ring-2 focus:ring-indigo-500/30 focus:border-indigo-500 text-slate-900 dark:text-white placeholder-slate-400 dark:placeholder-gray-500 transition-all outline-none"
                 placeholder="••••••••"
               />
+              <button
+                type="button"
+                onClick={() => setShowPw((v) => !v)}
+                aria-label={showPw ? 'Hide password' : 'Show password'}
+                tabIndex={-1}
+                className="absolute inset-y-0 right-0 pr-3 flex items-center text-slate-400 dark:text-gray-500 hover:text-slate-600 dark:hover:text-gray-300 transition-colors"
+              >
+                {showPw ? <EyeOff size={17} /> : <Eye size={17} />}
+              </button>
             </div>
           </div>
 

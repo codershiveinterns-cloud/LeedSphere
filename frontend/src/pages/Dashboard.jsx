@@ -10,6 +10,8 @@ import Header from '../components/common/Header';
 import RightPanel from '../components/RightPanel';
 import SearchModal from '../components/common/SearchModal';
 import CallRoom from '../components/Call/CallRoom';
+import IncomingCallModal from '../components/Call/IncomingCallModal';
+import useNotifications from '../hooks/useNotifications';
 import { Toaster } from 'react-hot-toast';
 import toast from 'react-hot-toast';
 import { Mail, Check, X } from 'lucide-react';
@@ -119,6 +121,10 @@ const Dashboard = () => {
   const location = useLocation();
   useEffect(() => { setMobileNavOpen(false); }, [location.pathname]);
 
+  // Subscribe to real-time notifications (toast + bell + incoming call).
+  // Mounted at the dashboard level so it survives across all sub-routes.
+  useNotifications();
+
   // Lock body scroll while the drawer is open.
   useEffect(() => {
     if (!mobileNavOpen) return;
@@ -219,6 +225,7 @@ const Dashboard = () => {
 
       <SearchModal />
       <CallRoom />
+      <IncomingCallModal />
       <Toaster position="top-right" />
     </div>
   );
