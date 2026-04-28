@@ -101,8 +101,8 @@ const ChatWindow = () => {
   const isPrivate = activeChannel?.type === 'private' || activeChannel?.isPrivate;
 
   return (
-    <div className="flex-1 bg-[#f5f6f8] dark:bg-[#0d1117] flex flex-col h-full relative overflow-hidden transition-colors duration-200">
-      <div className="h-14 flex items-center justify-between px-6 border-b border-slate-200 dark:border-gray-800 bg-white/90 dark:bg-[#161b22]/90 backdrop-blur-sm absolute top-0 w-full z-10 shrink-0 shadow-sm transition-colors duration-200">
+    <div className="flex-1 min-w-0 bg-[#f5f6f8] dark:bg-[#0d1117] flex flex-col h-full relative overflow-hidden transition-colors duration-200">
+      <div className="h-14 flex items-center justify-between px-3 sm:px-4 md:px-6 border-b border-slate-200 dark:border-gray-800 bg-white/90 dark:bg-[#161b22]/90 backdrop-blur-sm absolute top-0 w-full z-10 shrink-0 shadow-sm transition-colors duration-200">
         <button
           onClick={() => setShowChannelInfo(true)}
           className="flex items-center gap-2 text-slate-900 dark:text-white font-medium hover:text-indigo-600 dark:hover:text-indigo-300 transition-colors"
@@ -135,7 +135,7 @@ const ChatWindow = () => {
 
       <div className="flex-1 overflow-y-auto pt-[70px] pb-[90px] scroll-smooth flex flex-col min-h-0 relative">
         {messages.length === 0 ? (
-          <div className="flex-1 flex flex-col justify-end px-6 pb-8">
+          <div className="flex-1 flex flex-col justify-end px-3 sm:px-4 md:px-6 pb-8">
             <div className="w-16 h-16 rounded-2xl bg-indigo-50 dark:bg-indigo-500/10 flex items-center justify-center text-indigo-600 dark:text-indigo-400 mb-4"><Hash size={32} /></div>
             <h1 className="text-3xl font-bold text-slate-900 dark:text-white mb-2">Welcome to #{channelName}!</h1>
             <p className="text-slate-500 dark:text-gray-400">This is the start of the #{channelName} channel. Start the conversation!</p>

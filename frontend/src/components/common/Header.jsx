@@ -1,4 +1,4 @@
-import { LogOut, Search, Bell, Plus, Users, Hash, FileText, MessageSquare, CheckSquare, Sun, Moon } from 'lucide-react';
+import { LogOut, Search, Bell, Plus, Users, Hash, FileText, MessageSquare, CheckSquare, Sun, Moon, Menu } from 'lucide-react';
 import { useState, useRef, useEffect, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import useFirebaseAuthStore from '../../store/useFirebaseAuthStore';
@@ -11,7 +11,12 @@ import Modal from './Modal';
 import CreateChannelForm from '../channel/CreateChannelForm';
 import toast from 'react-hot-toast';
 
-const Header = () => {
+/**
+ * Top app bar.
+ *   onMenuClick — passed by Dashboard so the mobile hamburger can toggle
+ *                 the sidebar drawer. No-op when omitted (desktop pages).
+ */
+const Header = ({ onMenuClick }) => {
   // Identity from Firebase. Display fields come from displayName/email.
   const user = useFirebaseAuthStore((s) => s.currentUser);
   const {
@@ -118,10 +123,21 @@ const Header = () => {
 
   return (
     <>
-      <header className="h-14 bg-white dark:bg-[#161b22] border-b border-slate-200 dark:border-gray-800 flex items-center justify-between px-6 shrink-0 shadow-sm z-20 transition-colors duration-200">
-        <div className="flex items-center gap-2 min-w-0">
+      <header className="h-14 bg-white dark:bg-[#161b22] border-b border-slate-200 dark:border-gray-800 flex items-center justify-between px-3 sm:px-4 md:px-6 shrink-0 shadow-sm z-20 transition-colors duration-200">
+        <div className="flex items-center gap-1.5 sm:gap-2 min-w-0">
+          {/* Mobile drawer trigger — only visible < md. min-h-[40px] for tap. */}
+          {onMenuClick && (
+            <button
+              type="button"
+              onClick={onMenuClick}
+              aria-label="Open menu"
+              className="md:hidden inline-flex items-center justify-center w-10 h-10 -ml-1 rounded-lg text-slate-700 dark:text-gray-300 hover:bg-slate-100 dark:hover:bg-gray-800 transition-colors active:scale-95"
+            >
+              <Menu size={20} />
+            </button>
+          )}
           <div className="w-8 h-8 rounded-lg bg-indigo-600 flex items-center justify-center font-bold text-white shadow-md shadow-indigo-500/20 shrink-0">L</div>
-          <span className="font-bold text-xl text-slate-900 dark:text-white tracking-tight hidden sm:block">Leedsphere</span>
+          <span className="font-bold text-lg sm:text-xl text-slate-900 dark:text-white tracking-tight hidden sm:block">Leedsphere</span>
           {currentTeam ? (
             <>
               <span className="mx-3 text-slate-300 dark:text-gray-700 hidden sm:block">/</span>
@@ -166,10 +182,10 @@ const Header = () => {
           </button>
         </div>
 
-        <div className="flex items-center gap-4">
-          {/* Create Button */}
+        <div className="flex items-center gap-2 sm:gap-3 md:gap-4">
+          {/* Create Button — slightly larger touch target on mobile */}
           <div className="relative" ref={plusRef}>
-            <button onClick={() => setUiState('isGlobalPlusOpen', !uiStates.isGlobalPlusOpen)} className="w-8 h-8 rounded-full bg-indigo-600 hover:bg-indigo-500 text-white flex items-center justify-center transition-colors shadow-sm shadow-indigo-500/20"><Plus size={18} /></button>
+            <button onClick={() => setUiState('isGlobalPlusOpen', !uiStates.isGlobalPlusOpen)} aria-label="Create" className="w-9 h-9 sm:w-8 sm:h-8 rounded-full bg-indigo-600 hover:bg-indigo-500 text-white flex items-center justify-center transition-colors shadow-sm shadow-indigo-500/20 active:scale-95"><Plus size={18} /></button>
             {uiStates.isGlobalPlusOpen && (
               <div className="absolute right-0 mt-2 w-56 bg-white dark:bg-[#1c212b] border border-slate-200 dark:border-gray-700 shadow-2xl rounded-xl overflow-hidden z-50 animate-scale-in">
                 <div className="p-2 text-xs font-semibold text-slate-500 dark:text-gray-500 uppercase">Create New</div>

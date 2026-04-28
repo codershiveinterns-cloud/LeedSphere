@@ -1,5 +1,5 @@
 import { useEffect, useState, useRef } from 'react';
-import { useNavigate, Outlet } from 'react-router-dom';
+import { useNavigate, Outlet, useLocation } from 'react-router-dom';
 import useFirebaseAuthStore from '../store/useFirebaseAuthStore';
 import useAppStore from '../store/useAppStore';
 import useCurrentTeamStore from '../store/useCurrentTeamStore';
@@ -109,7 +109,23 @@ const Dashboard = () => {
   // the user has no active team context — we never assume admin.
   const myRole = currentTeam?.role || 'member';
   const [isRightPanelOpen, setIsRightPanelOpen] = useState(false);
+  // Mobile drawer (workspace + channel sidebars combined) — collapsed by
+  // default on small screens, opened from the hamburger in the header.
+  const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const hasFetched = useRef(false);
+
+  // Auto-close the drawer when the user navigates somewhere — picking a
+  // channel on mobile should reveal the chat, not leave the drawer over it.
+  const location = useLocation();
+  useEffect(() => { setMobileNavOpen(false); }, [location.pathname]);
+
+  // Lock body scroll while the drawer is open.
+  useEffect(() => {
+    if (!mobileNavOpen) return;
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => { document.body.style.overflow = prev; };
+  }, [mobileNavOpen]);
 
   console.debug('[Dashboard] render', { hasUser: Boolean(user), uid: user?.uid });
 
@@ -154,23 +170,50 @@ const Dashboard = () => {
   if (!user) return null;
 
   return (
-    <div className="h-screen w-full bg-[#f5f6f8] dark:bg-[#0d1117] flex flex-col font-sans transition-colors duration-200">
-      <Header />
+    <div className="h-screen w-full bg-[#f5f6f8] dark:bg-[#0d1117] flex flex-col font-sans transition-colors duration-200 overflow-hidden">
+      <Header onMenuClick={() => setMobileNavOpen(true)} />
       <InviteBanner />
 
       <main className="flex-1 flex overflow-hidden relative">
-        <Sidebar />
-        <InnerSidebar />
+        {/*
+         * Sidebar shell.
+         *   Desktop (md+): inline flex children, behaves exactly as before.
+         *   Mobile (< md): fixed slide-in drawer + backdrop. Translate-X
+         *                  toggles smoothly. No design / structure changed
+         *                  — same Sidebar + InnerSidebar components inside.
+         */}
+        {/* Backdrop — only mounted while open, dims behind the drawer. */}
+        {mobileNavOpen && (
+          <div
+            onClick={() => setMobileNavOpen(false)}
+            className="md:hidden fixed inset-0 top-14 z-30 bg-slate-900/40 dark:bg-black/60 backdrop-blur-sm transition-opacity"
+            aria-hidden="true"
+          />
+        )}
+
+        <div
+          className={`flex h-full shrink-0
+                      md:static md:translate-x-0
+                      fixed inset-y-0 left-0 top-14 z-40 md:z-auto
+                      transition-transform duration-300 ease-in-out
+                      ${mobileNavOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0'}`}
+        >
+          <Sidebar />
+          <InnerSidebar />
+        </div>
+
         {/*
          * Keep `simulatedRole` in the outlet context for legacy pages that still
          * read it, but bind it to the real per-team role (never "admin" by default).
          * Values: 'admin' | 'manager' | 'member'.
          */}
-        <Outlet context={{
-          myRole,
-          simulatedRole: myRole.charAt(0).toUpperCase() + myRole.slice(1),
-          toggleRightPanel: (forceOpen) => setIsRightPanelOpen(typeof forceOpen === 'boolean' ? forceOpen : p => !p),
-        }} />
+        <div className="flex-1 flex min-w-0 overflow-hidden">
+          <Outlet context={{
+            myRole,
+            simulatedRole: myRole.charAt(0).toUpperCase() + myRole.slice(1),
+            toggleRightPanel: (forceOpen) => setIsRightPanelOpen(typeof forceOpen === 'boolean' ? forceOpen : p => !p),
+          }} />
+        </div>
         <RightPanel isOpen={isRightPanelOpen} onClose={() => setIsRightPanelOpen(false)} />
       </main>
 
