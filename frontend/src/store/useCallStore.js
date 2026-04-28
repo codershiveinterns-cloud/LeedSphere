@@ -23,14 +23,54 @@ import { create } from 'zustand';
 import { socket } from '../hooks/useSocket';
 
 // ---- WebRTC configuration ----
+//
+// STUN alone connects ~70% of pairs in production. The remaining 30% — users
+// behind symmetric NAT (mobile carriers, corporate firewalls, hotel WiFi) —
+// MUST relay through a TURN server or the peer connection will go ICE-failed
+// after gathering completes.
+//
+// Provide TURN credentials via Vite env vars in production:
+//   VITE_TURN_URL       e.g. turn:turn.your-domain.com:3478?transport=udp
+//   VITE_TURN_USERNAME  short-lived credential username
+//   VITE_TURN_CREDENTIAL short-lived credential password
+//
+// You can supply multiple TURN URLs as a comma-separated list — useful for
+// providing TURN/UDP and TURN/TCP fallbacks for restrictive networks.
+const TURN_URLS = (import.meta.env?.VITE_TURN_URL || '')
+  .split(',')
+  .map((s) => s.trim())
+  .filter(Boolean);
+
 const ICE_SERVERS = [
   { urls: 'stun:stun.l.google.com:19302' },
   { urls: 'stun:stun1.l.google.com:19302' },
+  ...(TURN_URLS.length > 0
+    ? [{
+        urls: TURN_URLS,
+        username:   import.meta.env?.VITE_TURN_USERNAME || '',
+        credential: import.meta.env?.VITE_TURN_CREDENTIAL || '',
+      }]
+    : []),
 ];
+
+if (typeof window !== 'undefined') {
+  console.info('[call] ICE config', {
+    stun: ICE_SERVERS.filter((s) => String(s.urls).includes('stun')).length,
+    turn: TURN_URLS.length,
+    note: TURN_URLS.length === 0
+      ? 'No TURN configured — peers behind symmetric NAT will fail. Set VITE_TURN_URL.'
+      : 'TURN relay enabled.',
+  });
+}
 
 // ---- Module-level, non-reactive peer state ----
 // peerConns: Map<remoteSocketId, RTCPeerConnection>
 const peerConns = new Map();
+// Pending ICE candidates that arrived BEFORE we'd set the remote description.
+// Without this buffer, addIceCandidate throws InvalidStateError on slow
+// networks where Glare-style races happen. Flushed after setRemoteDescription.
+// pendingIce: Map<remoteSocketId, RTCIceCandidateInit[]>
+const pendingIce = new Map();
 // Local MediaStream (camera + mic) — mirrored into Zustand for tiles.
 let localMediaStream = null;
 // Active-speaker polling timer
@@ -247,17 +287,22 @@ const useCallStore = create((set, get) => ({
 function _createPeerConnection(remoteSocketId, remoteMeta, set, get) {
   const pc = new RTCPeerConnection({ iceServers: ICE_SERVERS });
   peerConns.set(remoteSocketId, pc);
+  console.info('[call] PC created', { remoteSocketId, name: remoteMeta?.name });
 
-  // Add our local tracks so the remote can receive us.
+  // Add our local tracks so the remote can receive us. MUST happen BEFORE
+  // createOffer/createAnswer so the SDP includes our m-lines.
   if (localMediaStream) {
     localMediaStream.getTracks().forEach((track) => {
       pc.addTrack(track, localMediaStream);
     });
+  } else {
+    console.warn('[call] No local stream when creating PC — remote will see audio/video-less m=lines');
   }
 
   // Remote track(s) arriving — bind to the UI tile.
   pc.ontrack = (ev) => {
     const stream = ev.streams[0];
+    console.info('[call] ontrack from peer', { remoteSocketId, kind: ev.track.kind });
     patchPeer(set, get, remoteSocketId, { stream });
   };
 
@@ -267,10 +312,28 @@ function _createPeerConnection(remoteSocketId, remoteMeta, set, get) {
         toSocketId: remoteSocketId,
         candidate: ev.candidate,
       });
+    } else {
+      console.debug('[call] ICE gathering complete', { remoteSocketId });
     }
   };
 
+  // Fine-grained ICE state — most useful for diagnosing prod connect failures.
+  pc.oniceconnectionstatechange = () => {
+    console.info('[call] iceConnectionState →', pc.iceConnectionState, { remoteSocketId });
+    if (pc.iceConnectionState === 'failed') {
+      console.error('[call] ICE failed — usually a missing/blocked TURN server. Check VITE_TURN_URL.');
+      // Attempt ICE restart once; if peers were merely behind a brief network
+      // hiccup this can recover without a full re-offer.
+      try { pc.restartIce?.(); } catch { /* not all browsers */ }
+    }
+  };
+
+  pc.onicegatheringstatechange = () => {
+    console.debug('[call] iceGatheringState →', pc.iceGatheringState, { remoteSocketId });
+  };
+
   pc.onconnectionstatechange = () => {
+    console.info('[call] connectionState →', pc.connectionState, { remoteSocketId });
     patchPeer(set, get, remoteSocketId, { connectionState: pc.connectionState });
     if (['failed', 'disconnected', 'closed'].includes(pc.connectionState)) {
       // Remote will emit call:user-left on graceful disconnects; fail-safe cleanup:
@@ -282,6 +345,10 @@ function _createPeerConnection(remoteSocketId, remoteMeta, set, get) {
         }
       }, 3000);
     }
+  };
+
+  pc.onsignalingstatechange = () => {
+    console.debug('[call] signalingState →', pc.signalingState, { remoteSocketId });
   };
 
   // Seed UI with the meta so the tile name/avatar render immediately (before media).
@@ -316,6 +383,17 @@ function _attachSignalingListeners(set, get) {
     }
   };
 
+  // Flush any ICE candidates that arrived before we had a remote description.
+  const flushPendingIce = async (remoteSocketId, pc) => {
+    const queue = pendingIce.get(remoteSocketId);
+    if (!queue?.length) return;
+    for (const cand of queue) {
+      try { await pc.addIceCandidate(new RTCIceCandidate(cand)); }
+      catch (err) { console.warn('[call] flush ICE failed:', err.message); }
+    }
+    pendingIce.delete(remoteSocketId);
+  };
+
   // 3) Peer sent us an offer — we're the joiner (or late joiner). Create answer.
   const onOffer = async ({ fromSocketId, fromUserId, fromName, fromAvatar, offer }) => {
     try {
@@ -324,11 +402,12 @@ function _attachSignalingListeners(set, get) {
         pc = _createPeerConnection(fromSocketId, { userId: fromUserId, name: fromName, avatar: fromAvatar }, set, get);
       }
       await pc.setRemoteDescription(new RTCSessionDescription(offer));
+      await flushPendingIce(fromSocketId, pc);
       const answer = await pc.createAnswer();
       await pc.setLocalDescription(answer);
       socket.emit('call:answer', { toSocketId: fromSocketId, answer });
     } catch (err) {
-      console.error('Failed to handle offer:', err);
+      console.error('[call] Failed to handle offer:', err);
     }
   };
 
@@ -337,8 +416,9 @@ function _attachSignalingListeners(set, get) {
       const pc = peerConns.get(fromSocketId);
       if (!pc) return;
       await pc.setRemoteDescription(new RTCSessionDescription(answer));
+      await flushPendingIce(fromSocketId, pc);
     } catch (err) {
-      console.error('Failed to handle answer:', err);
+      console.error('[call] Failed to handle answer:', err);
     }
   };
 
@@ -346,6 +426,13 @@ function _attachSignalingListeners(set, get) {
     try {
       const pc = peerConns.get(fromSocketId);
       if (!pc || !candidate) return;
+      // If remote description hasn't been set yet, buffer the candidate.
+      if (!pc.remoteDescription || !pc.remoteDescription.type) {
+        const queue = pendingIce.get(fromSocketId) || [];
+        queue.push(candidate);
+        pendingIce.set(fromSocketId, queue);
+        return;
+      }
       await pc.addIceCandidate(new RTCIceCandidate(candidate));
     } catch (err) {
       console.error('Failed to add ICE candidate:', err);

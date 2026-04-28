@@ -36,16 +36,49 @@ connectDB();
 const app = express();
 const httpServer = createServer(app);
 
-const io = new Server(httpServer, {
-  cors: {
-    origin: true,
-    methods: ['GET', 'POST', 'PUT', 'DELETE'],
-    credentials: true,
+/**
+ * CORS allowlist for both Express and Socket.IO.
+ *
+ * Production note: `origin: true` (the previous setting) reflected any
+ * caller's Origin header — convenient, but it makes signaling cross-origin
+ * issues harder to debug because rejected requests look identical to
+ * unrelated failures. We pin to an explicit list and let CORS_ORIGIN extend
+ * it via env var without a code change.
+ */
+const STATIC_ORIGINS = [
+  'http://localhost:5173',
+  'http://localhost:5174',
+  'http://localhost:3000',
+  'https://leed-sphere.vercel.app',
+];
+const ENV_ORIGINS = (process.env.CORS_ORIGIN || '')
+  .split(',')
+  .map((s) => s.trim())
+  .filter(Boolean);
+const ALLOWED_ORIGINS = [...new Set([...STATIC_ORIGINS, ...ENV_ORIGINS])];
+
+const corsOptions = {
+  origin: (origin, cb) => {
+    // Same-origin / curl requests have no Origin header — let them through.
+    if (!origin) return cb(null, true);
+    if (ALLOWED_ORIGINS.includes(origin)) return cb(null, true);
+    // Allow any *.vercel.app preview by default; useful while iterating.
+    if (/^https:\/\/[a-z0-9-]+\.vercel\.app$/.test(origin)) return cb(null, true);
+    return cb(new Error(`CORS: origin ${origin} not allowed`));
   },
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+};
+
+const io = new Server(httpServer, {
+  cors: corsOptions,
+  // Allow both transports so a corp proxy that blocks websockets falls back
+  // to long-poll instead of failing outright. The client prefers websocket.
+  transports: ['websocket', 'polling'],
 });
 
-// Middleware
-app.use(cors({ origin: true, credentials: true }));
+// Express CORS — same allowlist as Socket.IO so REST and signaling agree.
+app.use(cors(corsOptions));
 app.use(express.json({ limit: '10mb' }));
 app.use(cookieParser());
 

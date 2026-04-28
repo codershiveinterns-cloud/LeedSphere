@@ -1,7 +1,7 @@
 import { useMemo } from 'react';
 import { Mic, MicOff, Video, VideoOff, Monitor, MonitorOff, PhoneOff, X } from 'lucide-react';
 import useCallStore from '../../store/useCallStore';
-import useAuthStore from '../../store/useAuthStore';
+import useFirebaseAuthStore from '../../store/useFirebaseAuthStore';
 import useAppStore from '../../store/useAppStore';
 import VideoTile from './VideoTile';
 import toast from 'react-hot-toast';
@@ -28,7 +28,11 @@ const CallRoom = () => {
     activeSpeakerSocketId,
     toggleMic, toggleCam, toggleScreen, leaveCall, getLocalStream,
   } = useCallStore();
-  const { user } = useAuthStore();
+  // Mongo profile (post-Firebase migration). Same source the chat tile reads
+  // from, so the local video tile always shows the right name/avatar.
+  const profile = useFirebaseAuthStore((s) => s.profile);
+  const firebaseUser = useFirebaseAuthStore((s) => s.currentUser);
+  const user = profile || (firebaseUser ? { name: firebaseUser.displayName, avatar: firebaseUser.photoURL } : null);
   const { findChannelById } = useAppStore();
 
   // Re-read local stream whenever the tick bumps (mute/screen-share swap tracks).
