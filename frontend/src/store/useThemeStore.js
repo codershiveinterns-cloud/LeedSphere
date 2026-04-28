@@ -3,10 +3,14 @@ import { create } from 'zustand';
 const STORAGE_KEY = 'theme';
 
 const getInitialTheme = () => {
-  if (typeof window === 'undefined') return 'dark';
+  if (typeof window === 'undefined') return 'light';
+  // 1. Restore the user's explicit preference if they've ever toggled.
   const saved = localStorage.getItem(STORAGE_KEY);
   if (saved === 'light' || saved === 'dark') return saved;
-  return window.matchMedia?.('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+  // 2. Otherwise default to light (per design spec). We deliberately ignore
+  //    the OS-level prefers-color-scheme on first visit so the marketing
+  //    pages render in the design we control by default.
+  return 'light';
 };
 
 const applyThemeClass = (theme) => {
