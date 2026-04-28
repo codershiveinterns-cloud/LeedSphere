@@ -23,6 +23,7 @@ import noteRoutes from './src/routes/noteRoutes.js';
 import activityRoutes from './src/routes/activityRoutes.js';
 import notificationRoutes from './src/routes/notificationRoutes.js';
 import inviteRoutes from './src/routes/inviteRoutes.js';
+import inviteTokenRoutes from './src/routes/inviteTokenRoutes.js';
 import analyticsRoutes from './src/routes/analyticsRoutes.js';
 import searchRoutes from './src/routes/searchRoutes.js';
 import { getMyWorkspaces } from './src/controllers/workspaceController.js';
@@ -99,7 +100,8 @@ app.use('/api/conversations', conversationRoutes);
 app.use('/api/notes', noteRoutes);
 app.use('/api/activity', activityRoutes);
 app.use('/api/notifications', notificationRoutes);
-app.use('/api/invites', inviteRoutes);
+app.use('/api/invites', inviteRoutes);            // legacy: authenticated team-mgmt invites
+app.use('/api/invite',  inviteTokenRoutes);       // new:    token-based magic-link flow
 app.use('/api/analytics', analyticsRoutes);
 app.use('/api/search', searchRoutes);
 

@@ -20,6 +20,7 @@ import FirebaseSignup from './pages/auth/SignupFirebase';
 import FirebaseLogin from './pages/auth/LoginFirebase';
 import ForgotPassword from './pages/auth/ForgotPassword';
 import VerifyEmail from './pages/auth/VerifyEmail';
+import AcceptInvite from './pages/auth/AcceptInvite';
 import RequireFirebaseAuth from './components/auth/RequireFirebaseAuth';
 
 // Marketing / legal pages — bespoke ones (custom logic, e.g. Contact form,
@@ -88,6 +89,8 @@ function App() {
           <Route path="/register" element={<Navigate to="/signup" replace />} />
           <Route path="/forgot-password" element={<ForgotPassword />} />
           <Route path="/verify-email" element={<VerifyEmail />} />
+          {/* Magic-link invite landing — public, validated against the token */}
+          <Route path="/accept-invite/:token" element={<AcceptInvite />} />
 
           <Route path="/teams/select" element={<TeamSelect />} />
 
