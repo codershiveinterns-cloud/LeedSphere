@@ -1368,7 +1368,7 @@ export const PAGES = {
       {
         type: 'cta',
         heading: 'Press inquiries',
-        body: 'Email press@leedsphere.app or use the contact form. We aim to reply within one business day.',
+        body: 'Email admin@leedsphere.com or use the contact form. We aim to reply within one business day.',
         button: { label: 'Contact press', to: '/contact' },
       },
     ],

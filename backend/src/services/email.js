@@ -18,6 +18,9 @@ import { Resend } from 'resend';
 const RESEND_API_KEY = process.env.RESEND_API_KEY || '';
 const FRONTEND_URL   = (process.env.FRONTEND_URL || 'https://www.leedsphere.com').replace(/\/+$/, '');
 const MAIL_FROM      = process.env.MAIL_FROM || 'Leedsphere <noreply@leedsphere.com>';
+// Single source of truth for the global support inbox. Override via env if
+// the operations team ever moves to a different alias.
+export const SUPPORT_EMAIL = process.env.SUPPORT_EMAIL || 'admin@leedsphere.com';
 
 let _client = null;
 const client = () => {
@@ -142,4 +145,151 @@ export const sendInviteEmail = async ({ to, token, teamName, inviterName, role }
     console.error('[email] Resend send failed:', err?.message || err);
     return null;
   }
+};
+
+/* ============================================================
+ * Contact form
+ *   sendContactEmails({ name, email, company, message })
+ *     1. Notification → admin@leedsphere.com (reply-to set to user)
+ *     2. Auto-reply   → user with confirmation copy
+ *
+ *   Returns { admin, user } — each is the Resend response or null.
+ * ============================================================ */
+
+const escapeHtml = (s) => String(s || '')
+  .replace(/&/g, '&amp;')
+  .replace(/</g, '&lt;')
+  .replace(/>/g, '&gt;')
+  .replace(/"/g, '&quot;')
+  .replace(/'/g, '&#39;');
+
+const renderContactNotificationHtml = ({ name, email, company, message, sentAt }) => `
+<!doctype html>
+<html><body style="margin:0;background:#f5f6f8;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;color:#0f172a;">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f5f6f8;padding:32px 16px;">
+  <tr><td align="center">
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:560px;background:#ffffff;border-radius:14px;box-shadow:0 6px 20px rgba(15,23,42,0.06);overflow:hidden;">
+      <tr><td style="padding:24px 28px;border-bottom:1px solid #e2e8f0;">
+        <div style="font-size:13px;color:#64748b;letter-spacing:0.04em;text-transform:uppercase;font-weight:600;">Leedsphere — New contact message</div>
+      </td></tr>
+      <tr><td style="padding:24px 28px;">
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
+          <tr><td style="padding:6px 0;color:#475569;font-size:13px;width:120px;">Name</td><td style="padding:6px 0;color:#0f172a;font-size:14px;font-weight:600;">${escapeHtml(name)}</td></tr>
+          <tr><td style="padding:6px 0;color:#475569;font-size:13px;">Email</td><td style="padding:6px 0;font-size:14px;"><a href="mailto:${escapeHtml(email)}" style="color:#4f46e5;text-decoration:none;">${escapeHtml(email)}</a></td></tr>
+          <tr><td style="padding:6px 0;color:#475569;font-size:13px;">Company</td><td style="padding:6px 0;color:#0f172a;font-size:14px;">${escapeHtml(company) || '<span style="color:#94a3b8;">—</span>'}</td></tr>
+          <tr><td style="padding:6px 0;color:#475569;font-size:13px;vertical-align:top;">Sent at</td><td style="padding:6px 0;color:#0f172a;font-size:14px;">${escapeHtml(sentAt)}</td></tr>
+        </table>
+        <hr style="border:none;border-top:1px solid #e2e8f0;margin:18px 0;">
+        <div style="font-size:13px;color:#475569;margin-bottom:8px;font-weight:600;">Message</div>
+        <div style="white-space:pre-wrap;background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;padding:14px;font-size:14px;line-height:1.6;color:#0f172a;">${escapeHtml(message)}</div>
+      </td></tr>
+    </table>
+    <p style="margin:14px 0 0;color:#94a3b8;font-size:12px;">Reply to this email to respond directly.</p>
+  </td></tr>
+</table>
+</body></html>`;
+
+const renderContactNotificationText = ({ name, email, company, message, sentAt }) => `
+New Contact Message — Leedsphere
+
+Name: ${name}
+Email: ${email}
+Company: ${company || '—'}
+Sent at: ${sentAt}
+
+Message:
+${message}
+`;
+
+const renderContactAutoReplyHtml = ({ name, message }) => `
+<!doctype html>
+<html><body style="margin:0;background:#f5f6f8;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;color:#0f172a;">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f5f6f8;padding:40px 16px;">
+  <tr><td align="center">
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:520px;background:#ffffff;border-radius:16px;box-shadow:0 8px 24px rgba(15,23,42,0.06);overflow:hidden;">
+      <tr><td style="padding:32px 32px 8px;">
+        <div style="display:inline-flex;align-items:center;gap:8px;">
+          <div style="width:36px;height:36px;border-radius:10px;background:linear-gradient(135deg,#6366f1,#a855f7);color:#fff;font-weight:700;font-size:18px;display:flex;align-items:center;justify-content:center;">L</div>
+          <span style="font-weight:700;font-size:18px;letter-spacing:-0.01em;">Leedsphere</span>
+        </div>
+      </td></tr>
+      <tr><td style="padding:8px 32px 0;">
+        <h1 style="margin:18px 0 8px;font-size:24px;line-height:1.2;letter-spacing:-0.02em;">We received your message</h1>
+        <p style="margin:0 0 16px;color:#475569;line-height:1.6;font-size:15px;">
+          Hi ${escapeHtml(name) || 'there'}, thank you for contacting Leedsphere. Our team will get back to you shortly.
+        </p>
+        <div style="margin:8px 0 4px;color:#64748b;font-size:13px;font-weight:600;">Your message</div>
+        <div style="white-space:pre-wrap;background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;padding:14px;font-size:14px;line-height:1.6;color:#0f172a;">${escapeHtml(message)}</div>
+      </td></tr>
+      <tr><td style="padding:24px 32px 32px;">
+        <p style="margin:0;color:#64748b;font-size:13px;line-height:1.5;">
+          Need to add something? Just reply to this email — it lands in the same inbox.
+        </p>
+      </td></tr>
+    </table>
+    <p style="margin:16px 0 0;color:#94a3b8;font-size:12px;">&copy; ${new Date().getFullYear()} Leedsphere</p>
+  </td></tr>
+</table>
+</body></html>`;
+
+const renderContactAutoReplyText = ({ name, message }) => `
+Hi ${name || 'there'},
+
+Thank you for contacting Leedsphere.
+We have received your message and our team will get back to you shortly.
+
+Your Message:
+"${message}"
+
+Regards,
+Leedsphere Team
+`;
+
+export const sendContactEmails = async ({ name, email, company, message }) => {
+  const sentAt = new Date().toISOString().replace('T', ' ').replace(/\..+/, ' UTC');
+  const c = client();
+
+  const adminPayload = {
+    name, email, company: company || '', message, sentAt,
+  };
+
+  if (!c) {
+    console.warn('[email] RESEND_API_KEY not set — contact emails not sent.', { to: SUPPORT_EMAIL, from: email });
+    return { admin: null, user: null };
+  }
+
+  // Notification to support inbox. reply_to lets the team hit "reply" and
+  // respond directly to the user without copy-pasting addresses.
+  let admin = null;
+  try {
+    admin = await c.emails.send({
+      from: MAIL_FROM,
+      to: [SUPPORT_EMAIL],
+      reply_to: email,
+      subject: `New contact message from ${name}`,
+      html: renderContactNotificationHtml(adminPayload),
+      text: renderContactNotificationText(adminPayload),
+    });
+    console.info('[email] contact notification sent', { id: admin?.data?.id || admin?.id });
+  } catch (err) {
+    console.error('[email] contact notification failed:', err?.message || err);
+  }
+
+  // Auto-reply to the user.
+  let user = null;
+  try {
+    user = await c.emails.send({
+      from: MAIL_FROM,
+      to: [email],
+      reply_to: SUPPORT_EMAIL,
+      subject: 'We received your message - Leedsphere',
+      html: renderContactAutoReplyHtml({ name, message }),
+      text: renderContactAutoReplyText({ name, message }),
+    });
+    console.info('[email] contact auto-reply sent', { to: email, id: user?.data?.id || user?.id });
+  } catch (err) {
+    console.error('[email] contact auto-reply failed:', err?.message || err);
+  }
+
+  return { admin, user };
 };
