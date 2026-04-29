@@ -17,7 +17,7 @@ import { Resend } from 'resend';
 
 const RESEND_API_KEY = process.env.RESEND_API_KEY || '';
 const FRONTEND_URL   = (process.env.FRONTEND_URL || 'http://localhost:5173').replace(/\/+$/, '');
-const MAIL_FROM      = process.env.MAIL_FROM || 'Leedsphere <noreply@leedsphere.app>';
+const MAIL_FROM      = process.env.MAIL_FROM || 'Leedsphere <noreply@leedsphere.com>';
 
 let _client = null;
 const client = () => {
