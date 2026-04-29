@@ -340,6 +340,57 @@ const useAppStore = create((set, get) => ({
     }
   },
 
+  // Per-team invite list (admin/manager view). Stored keyed by teamId so
+  // multiple TeamDetails tabs don't clobber each other.
+  teamInvites: {},
+
+  fetchTeamInvitesList: async (teamId) => {
+    try {
+      const res = await api.get(`/invites/team/${teamId}`);
+      set((state) => ({ teamInvites: { ...state.teamInvites, [teamId]: res.data || [] } }));
+      return res.data;
+    } catch (err) {
+      console.error('fetchTeamInvitesList:', err.message);
+      throw err;
+    }
+  },
+
+  getTeamInvitesList: (teamId) => get().teamInvites[teamId] || [],
+
+  revokeInvite: async (teamId, inviteId) => {
+    try {
+      await api.delete(`/invites/${inviteId}`);
+      set((state) => ({
+        teamInvites: {
+          ...state.teamInvites,
+          [teamId]: (state.teamInvites[teamId] || []).filter(i => i._id !== inviteId),
+        },
+      }));
+    } catch (err) {
+      console.error('revokeInvite:', err.message);
+      throw err;
+    }
+  },
+
+  resendInvite: async (teamId, inviteId) => {
+    try {
+      const res = await api.post(`/invites/${inviteId}/resend`);
+      // Patch local state with the new expiresAt so the row updates without a refetch.
+      set((state) => ({
+        teamInvites: {
+          ...state.teamInvites,
+          [teamId]: (state.teamInvites[teamId] || []).map(i =>
+            i._id === inviteId ? { ...i, expiresAt: res.data?.expiresAt || i.expiresAt, status: 'pending' } : i,
+          ),
+        },
+      }));
+      return res.data;
+    } catch (err) {
+      console.error('resendInvite:', err.message);
+      throw err;
+    }
+  },
+
   // =====================
   // CHANNEL ACTIONS (API-driven)
   // =====================

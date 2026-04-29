@@ -198,6 +198,12 @@ export const revokeInvite = async (req, res) => {
     const invite = await Invite.findById(req.params.id);
     if (!invite) return res.status(404).json({ message: 'Invite not found' });
 
+    // Refuse to delete an already-accepted invite — the user is on the team now,
+    // and removing the audit record could surprise admins. Use member-removal instead.
+    if (invite.status === 'accepted' || invite.accepted) {
+      return res.status(400).json({ message: 'Cannot delete an invite that has already been accepted' });
+    }
+
     const team = await Team.findById(invite.teamId).select('members');
     if (!team) return res.status(404).json({ message: 'Team not found' });
 
@@ -207,8 +213,67 @@ export const revokeInvite = async (req, res) => {
     }
 
     await Invite.findByIdAndDelete(req.params.id);
-    res.json({ message: 'Invite revoked' });
+    console.log('Invite deleted:', invite.email);
+    res.json({ message: 'Invite revoked', _id: invite._id });
   } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+};
+
+// POST /api/invites/:id/resend
+// Generates a fresh token + 24h expiry, invalidating any previously-emailed
+// link for the same invite, and re-sends the email via Resend.
+export const resendInvite = async (req, res) => {
+  try {
+    const invite = await Invite.findById(req.params.id);
+    if (!invite) return res.status(404).json({ message: 'Invite not found' });
+    if (invite.status === 'accepted' || invite.accepted) {
+      return res.status(400).json({ message: 'This invite has already been accepted' });
+    }
+
+    const team = await Team.findById(invite.teamId).select('members name');
+    if (!team) return res.status(404).json({ message: 'Team not found' });
+
+    const myRole = team.members.find((m) => String(m.userId) === String(req.user._id))?.role;
+    if (!myRole || !['admin', 'manager'].includes(myRole)) {
+      return res.status(403).json({ message: 'Access denied. Insufficient permissions.' });
+    }
+
+    // Rotate the token + reset expiry. The old link in the previous email
+    // becomes a 404 the moment this runs — that is the desired behavior.
+    const token = generateInviteToken();
+    const expiresAt = new Date(Date.now() + TOKEN_TTL_MS);
+    invite.token = token;
+    invite.expiresAt = expiresAt;
+    invite.status = 'pending';
+    invite.accepted = false;
+    await invite.save();
+
+    try {
+      await sendInviteEmail({
+        to: invite.email,
+        token,
+        teamName: team.name,
+        inviterName: req.user.name || 'Someone',
+        role: invite.role,
+      });
+      console.log('Invite resent:', invite.email);
+    } catch (err) {
+      console.error('Resend email failed:', err?.message || err);
+      // DB has the new token regardless; surface a soft error so the admin
+      // knows to retry rather than assuming success.
+      return res.status(502).json({ message: 'Token refreshed but email failed to send. Try again.' });
+    }
+
+    res.json({
+      ok: true,
+      message: 'Invite resent',
+      _id: invite._id,
+      email: invite.email,
+      expiresAt,
+    });
+  } catch (err) {
+    console.error('resendInvite:', err);
     res.status(500).json({ message: err.message });
   }
 };

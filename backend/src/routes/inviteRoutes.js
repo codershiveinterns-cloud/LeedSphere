@@ -1,5 +1,5 @@
 import express from 'express';
-import { createInvite, getMyPendingInvites, getTeamInvites, acceptInvite, declineInvite, revokeInvite } from '../controllers/inviteController.js';
+import { createInvite, getMyPendingInvites, getTeamInvites, acceptInvite, declineInvite, revokeInvite, resendInvite } from '../controllers/inviteController.js';
 import { protect } from '../middleware/auth.js';
 import { resolveTeamRole, requireTeamRole } from '../middleware/teamRole.js';
 
@@ -19,6 +19,9 @@ router.get('/pending', protect, getMyPendingInvites);
 router.get('/team/:teamId', protect, resolveTeamRole({ required: true }), requireTeamRole('admin', 'manager'), getTeamInvites);
 router.post('/:id/accept', protect, acceptInvite);
 router.post('/:id/decline', protect, declineInvite);
+// Resend rotates the token + re-emails — admin/manager check is in the controller
+// because the team is on the invite, not the URL.
+router.post('/:id/resend', protect, resendInvite);
 router.delete('/:id', protect, revokeInvite); // controller-level check; team can't be resolved without an extra Invite lookup
 
 export default router;

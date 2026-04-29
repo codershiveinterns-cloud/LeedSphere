@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { Users, Hash, Settings, Lock, UserMinus, Mail, Shield, ShieldCheck, Crown, Plus, Loader2 } from 'lucide-react';
+import { Users, Hash, Settings, Lock, UserMinus, Mail, Shield, ShieldCheck, Crown, Plus, Loader2, Trash2, RotateCw, Clock, AlertTriangle } from 'lucide-react';
 import useAppStore from '../store/useAppStore';
 import useCurrentTeamStore from '../store/useCurrentTeamStore';
 import Modal from '../components/common/Modal';
@@ -44,6 +44,8 @@ const TeamDetails = () => {
     getTeamChannels, fetchTeamChannels,
     getTeamActivity, fetchTeamActivity,
     sendInvite,
+    fetchTeamInvitesList, getTeamInvitesList,
+    revokeInvite, resendInvite,
   } = useAppStore();
 
   const [activeTab, setActiveTab] = useState('Members');
@@ -61,6 +63,9 @@ const TeamDetails = () => {
       if (resolvedTeam && resolvedTeam._id !== activeTeam?._id) setActiveTeam(resolvedTeam);
       fetchTeamChannels(id);
       fetchTeamActivity(id);
+      // Pull invite list quietly — admin/manager-only on the backend, so a 403
+      // for regular members is expected and silently swallowed by the action.
+      fetchTeamInvitesList(id).catch(() => {});
     }
   }, [id]);
 
@@ -68,6 +73,15 @@ const TeamDetails = () => {
   const members = teamId ? getTeamMembers(teamId) : [];
   const teamChannels = teamId ? getTeamChannels(teamId) : [];
   const activity = teamId ? getTeamActivity(teamId) : [];
+  const invitesList = teamId ? getTeamInvitesList(teamId) : [];
+  const pendingInvitesList = invitesList.filter(i => i.status === 'pending');
+
+  // If the GET /invites/team/:id call returned data, the backend already
+  // confirmed admin/manager — no need to recompute role on the client.
+  const canManageInvites = invitesList.length > 0 || pendingInvitesList.length > 0;
+
+  const [pendingAction, setPendingAction] = useState({}); // { [inviteId]: 'delete' | 'resend' }
+  const [confirmDelete, setConfirmDelete] = useState(null); // invite object
 
   // Pre-compute relative times once per activity change (avoids Date.now() during render of each item)
   const activityLabeled = useMemo(() => {
@@ -142,6 +156,33 @@ const TeamDetails = () => {
       await removeTeamMember(teamId, userId);
       toast.success(`${name} removed`);
     } catch { toast.error('Failed to remove member'); }
+  };
+
+  const handleResendInvite = async (invite) => {
+    setPendingAction(p => ({ ...p, [invite._id]: 'resend' }));
+    try {
+      await resendInvite(teamId, invite._id);
+      toast.success('Invite resent');
+    } catch (err) {
+      toast.error(err.response?.data?.message || 'Failed to resend invite');
+    } finally {
+      setPendingAction(p => { const n = { ...p }; delete n[invite._id]; return n; });
+    }
+  };
+
+  const handleConfirmDelete = async () => {
+    if (!confirmDelete) return;
+    const invite = confirmDelete;
+    setPendingAction(p => ({ ...p, [invite._id]: 'delete' }));
+    try {
+      await revokeInvite(teamId, invite._id);
+      toast.success(`Invite to ${invite.email} deleted`);
+      setConfirmDelete(null);
+    } catch (err) {
+      toast.error(err.response?.data?.message || 'Failed to delete invite');
+    } finally {
+      setPendingAction(p => { const n = { ...p }; delete n[invite._id]; return n; });
+    }
   };
 
   const inputCls = 'bg-white dark:bg-[#0d1117] border border-slate-200 dark:border-gray-700 rounded-lg px-4 py-2 text-slate-900 dark:text-white focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none transition-colors placeholder-slate-400 dark:placeholder-gray-600';
@@ -246,6 +287,92 @@ const TeamDetails = () => {
           </div>
         );
 
+      case 'Invites':
+        return (
+          <div className="flex flex-col gap-2 mt-4">
+            <div className="flex items-center justify-between mb-3">
+              <p className="text-sm text-slate-500 dark:text-gray-400">
+                {pendingInvitesList.length} pending invite{pendingInvitesList.length === 1 ? '' : 's'}
+              </p>
+              <button onClick={() => setShowInviteModal(true)}
+                className="flex items-center gap-1.5 bg-indigo-600 hover:bg-indigo-500 text-white px-3 py-1.5 rounded-lg text-sm font-medium transition-colors shadow-sm active:scale-95">
+                <Mail size={14} /> New invite
+              </button>
+            </div>
+            {pendingInvitesList.length === 0 ? (
+              <div className="flex flex-col items-center justify-center py-16 text-center animate-fade-in">
+                <Mail size={40} className="text-slate-300 dark:text-gray-700 mb-3" />
+                <p className="text-slate-700 dark:text-gray-400 font-medium mb-1">No pending invites</p>
+                <p className="text-slate-500 dark:text-gray-600 text-sm mb-4">Send one to bring someone onto the team</p>
+                <button onClick={() => setShowInviteModal(true)} className="bg-indigo-600 hover:bg-indigo-500 text-white px-4 py-2 rounded-lg text-sm font-medium shadow-sm transition-colors active:scale-95">Send invite</button>
+              </div>
+            ) : (
+              <div className="overflow-hidden rounded-xl border border-slate-200 dark:border-gray-800 bg-white dark:bg-[#0e1116]">
+                <table className="w-full text-sm">
+                  <thead className="bg-slate-50 dark:bg-[#1c212b] text-slate-600 dark:text-gray-400 text-xs uppercase tracking-wide">
+                    <tr>
+                      <th className="text-left px-4 py-2.5 font-medium">Email</th>
+                      <th className="text-left px-4 py-2.5 font-medium">Status</th>
+                      <th className="text-left px-4 py-2.5 font-medium">Expires</th>
+                      <th className="text-right px-4 py-2.5 font-medium">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {pendingInvitesList.map((inv) => {
+                      const expMs = inv.expiresAt ? new Date(inv.expiresAt).getTime() : 0;
+                      const expired = expMs > 0 && expMs < Date.now();
+                      const status = expired ? 'Expired' : 'Pending';
+                      const action = pendingAction[inv._id];
+                      const expLabel = inv.expiresAt
+                        ? (expired
+                            ? `${relativeTime(Date.now() - expMs)} ago`
+                            : `in ${relativeTime(expMs - Date.now())}`)
+                        : '—';
+                      return (
+                        <tr key={inv._id} className="border-t border-slate-200 dark:border-gray-800">
+                          <td className="px-4 py-3 text-slate-800 dark:text-gray-200">{inv.email}</td>
+                          <td className="px-4 py-3">
+                            <span className={`inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full font-medium border ${
+                              expired
+                                ? 'text-amber-700 bg-amber-50 border-amber-200 dark:text-amber-400 dark:bg-amber-500/10 dark:border-amber-500/20'
+                                : 'text-emerald-700 bg-emerald-50 border-emerald-200 dark:text-emerald-400 dark:bg-emerald-500/10 dark:border-emerald-500/20'
+                            }`}>
+                              <Clock size={10} /> {status}
+                            </span>
+                          </td>
+                          <td className="px-4 py-3 text-slate-500 dark:text-gray-400 text-xs">{expLabel}</td>
+                          <td className="px-4 py-3 text-right">
+                            <div className="inline-flex items-center gap-2">
+                              <button
+                                onClick={() => handleResendInvite(inv)}
+                                disabled={Boolean(action)}
+                                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-purple-600 hover:bg-purple-500 text-white disabled:opacity-50 disabled:cursor-not-allowed transition-colors active:scale-95"
+                                title="Resend with a new link"
+                              >
+                                {action === 'resend' ? <Loader2 size={12} className="animate-spin" /> : <RotateCw size={12} />}
+                                Resend
+                              </button>
+                              <button
+                                onClick={() => setConfirmDelete(inv)}
+                                disabled={Boolean(action)}
+                                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-red-600 hover:bg-red-500 text-white disabled:opacity-50 disabled:cursor-not-allowed transition-colors active:scale-95"
+                                title="Delete this invite"
+                              >
+                                {action === 'delete' ? <Loader2 size={12} className="animate-spin" /> : <Trash2 size={12} />}
+                                Delete
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        );
+
       case 'Activity':
         return (
           <div className="flex flex-col gap-1 mt-4">
@@ -295,12 +422,13 @@ const TeamDetails = () => {
           </div>
 
           <div className="flex border-b border-slate-200 dark:border-gray-800 gap-6 mt-2 mb-4 shrink-0">
-            {['Members', 'Channels', 'Activity'].map(tab => (
+            {['Members', 'Channels', ...(canManageInvites ? ['Invites'] : []), 'Activity'].map(tab => (
               <button key={tab} onClick={() => setActiveTab(tab)}
                 className={`py-3 text-sm font-medium transition-colors relative ${activeTab === tab ? 'text-slate-900 dark:text-white' : 'text-slate-500 dark:text-gray-500 hover:text-slate-800 dark:hover:text-gray-300'}`}>
                 {tab}
                 {tab === 'Members' && <span className="ml-1.5 text-xs text-slate-400 dark:text-gray-600">{members.length}</span>}
                 {tab === 'Channels' && <span className="ml-1.5 text-xs text-slate-400 dark:text-gray-600">{teamChannels.length}</span>}
+                {tab === 'Invites' && <span className="ml-1.5 text-xs text-slate-400 dark:text-gray-600">{pendingInvitesList.length}</span>}
                 {activeTab === tab && <div className="absolute bottom-0 left-0 w-full h-[2px] bg-indigo-500 rounded-t-full"></div>}
               </button>
             ))}
@@ -383,6 +511,40 @@ const TeamDetails = () => {
             </button>
           </div>
         </form>
+      </Modal>
+
+      {/* Delete-invite confirmation. Modal closes on Cancel; Delete keeps it
+          open until the API call resolves so the spinner stays visible. */}
+      <Modal isOpen={Boolean(confirmDelete)} onClose={() => !pendingAction[confirmDelete?._id] && setConfirmDelete(null)} title="Delete invite?">
+        <div className="flex flex-col gap-4">
+          <div className="flex items-start gap-3">
+            <div className="shrink-0 w-10 h-10 rounded-lg bg-red-50 dark:bg-red-500/10 text-red-600 dark:text-red-400 flex items-center justify-center">
+              <AlertTriangle size={20} />
+            </div>
+            <div className="text-sm text-slate-600 dark:text-gray-400 leading-relaxed">
+              The invite link sent to <span className="font-medium text-slate-900 dark:text-gray-200">{confirmDelete?.email}</span> will stop working immediately. This can't be undone.
+            </div>
+          </div>
+          <div className="flex justify-end gap-3 mt-2">
+            <button
+              type="button"
+              onClick={() => setConfirmDelete(null)}
+              disabled={Boolean(pendingAction[confirmDelete?._id])}
+              className="px-4 py-2 text-sm text-slate-500 dark:text-gray-400 hover:text-slate-900 dark:hover:text-white transition-colors active:scale-95 disabled:opacity-50"
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              onClick={handleConfirmDelete}
+              disabled={Boolean(pendingAction[confirmDelete?._id])}
+              className="px-5 py-2 text-sm bg-red-600 hover:bg-red-500 text-white rounded-lg disabled:opacity-50 flex items-center gap-1.5 shadow-sm transition-colors active:scale-95"
+            >
+              {pendingAction[confirmDelete?._id] === 'delete' ? <Loader2 size={14} className="animate-spin" /> : <Trash2 size={14} />}
+              Delete invite
+            </button>
+          </div>
+        </div>
       </Modal>
     </div>
   );
