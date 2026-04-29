@@ -1,8 +1,13 @@
+import crypto from 'crypto';
 import Invite from '../models/Invite.js';
 import Team from '../models/Team.js';
 import User from '../models/User.js';
 import Activity from '../models/Activity.js';
 import { ensureWorkspaceMember } from './workspaceController.js';
+import { sendInviteEmail } from '../services/email.js';
+
+const TOKEN_TTL_MS = 24 * 60 * 60 * 1000;
+const generateInviteToken = () => crypto.randomBytes(24).toString('hex');
 
 const normalizeInviteRole = (role) => (role === 'manager' ? 'manager' : 'member');
 const TEAM_ROLE_RANK = { member: 1, manager: 2, admin: 3 };
@@ -10,7 +15,7 @@ const maxTeamRole = (a, b) => (
   (TEAM_ROLE_RANK[a] || 1) >= (TEAM_ROLE_RANK[b] || 1) ? a : b
 );
 
-// POST /api/invites — create an invite (no email sent)
+// POST /api/invites ï¿½ create an invite (no email sent)
 export const createInvite = async (req, res) => {
   try {
     const { email, teamId, role, designation } = req.body;
@@ -36,19 +41,44 @@ export const createInvite = async (req, res) => {
       return res.status(400).json({ message: 'A pending invite already exists for this email' });
     }
 
+    // Generate magic-link token + 24h expiry alongside the in-app invite so
+    // the same record powers both: dashboard list (in-app) AND emailed link.
+    const token = generateInviteToken();
+    const expiresAt = new Date(Date.now() + TOKEN_TTL_MS);
+
     const invite = await Invite.create({
       email: email.toLowerCase(),
       teamId,
       role: normalizedRole,
       designation: designation || '',
       invitedBy: req.user._id,
+      token,
+      expiresAt,
     });
+
+    console.log('Invite created for:', email.toLowerCase());
 
     await Activity.create({
       userId: req.user._id,
       action: `Invited ${email} to "${team.name}" as ${normalizedRole}`,
       teamId,
     });
+
+    // Email send is best-effort: a Resend outage must not roll back the
+    // in-app invite the admin just created.
+    try {
+      console.log('Sending email invite...');
+      await sendInviteEmail({
+        to: email.toLowerCase(),
+        token,
+        teamName: team.name,
+        inviterName: req.user.name || 'Someone',
+        role: normalizedRole,
+      });
+      console.log('Email sent successfully');
+    } catch (err) {
+      console.error('Email failed but invite created:', err?.message || err);
+    }
 
     const populated = await Invite.findById(invite._id)
       .populate('teamId', 'name')

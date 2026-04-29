@@ -31,6 +31,7 @@ import { getMyWorkspaces } from './src/controllers/workspaceController.js';
 import { handleSockets } from './src/sockets/socketHandler.js';
 import { setIO } from './src/sockets/io.js';
 import { startReminderCrons } from './src/services/reminderCron.js';
+import { sendInviteEmail } from './src/services/email.js';
 
 dotenv.config();
 
@@ -120,6 +121,35 @@ app.use('/projects', projectRoutes);
 app.use('/tasks', taskRoutes);
 app.use('/roles', roleRoutes);
 app.use('/events', eventRoutes);
+
+// Debug-only: verify Resend wiring end-to-end without touching the DB.
+//   curl "http://localhost:5005/test-email?to=you@example.com"
+// Returns whether RESEND_API_KEY + MAIL_FROM produced a successful send.
+// NOTE: no auth — keep this off in production or gate behind an env flag.
+app.get('/test-email', async (req, res) => {
+  const to = req.query.to;
+  if (!to) return res.status(400).json({ ok: false, message: 'pass ?to=email@example.com' });
+  try {
+    console.log('[test-email] sending to:', to);
+    const result = await sendInviteEmail({
+      to,
+      token: 'test-token-not-real',
+      teamName: 'Resend Test',
+      inviterName: 'Leedsphere',
+      role: 'member',
+    });
+    res.json({
+      ok: true,
+      sent: Boolean(result),
+      hasApiKey: Boolean(process.env.RESEND_API_KEY),
+      mailFrom: process.env.MAIL_FROM || '(default)',
+      result,
+    });
+  } catch (err) {
+    console.error('[test-email] failed:', err?.message || err);
+    res.status(500).json({ ok: false, message: err?.message || String(err) });
+  }
+});
 
 // Base route
 app.get('/', (req, res) => {
