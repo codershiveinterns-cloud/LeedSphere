@@ -53,6 +53,8 @@ const STATIC_ORIGINS = [
   'http://localhost:5174',
   'http://localhost:3000',
   'https://leed-sphere.vercel.app',
+  'https://leedsphere.com',
+  'https://www.leedsphere.com',
 ];
 const ENV_ORIGINS = (process.env.CORS_ORIGIN || '')
   .split(',')
@@ -74,10 +76,14 @@ const corsOptions = {
 };
 
 const io = new Server(httpServer, {
+  // Explicit path so client + server agree even if defaults change in a
+  // future Socket.IO release. Must match the client's `path` option.
+  path: '/socket.io',
   cors: corsOptions,
-  // Allow both transports so a corp proxy that blocks websockets falls back
-  // to long-poll instead of failing outright. The client prefers websocket.
-  transports: ['websocket', 'polling'],
+  // Order matters in some proxy setups: polling first so the handshake
+  // succeeds even when websockets are blocked, then upgrade to ws. This
+  // is also what the Socket.IO client is now configured to expect.
+  transports: ['polling', 'websocket'],
 });
 
 // Express CORS — same allowlist as Socket.IO so REST and signaling agree.

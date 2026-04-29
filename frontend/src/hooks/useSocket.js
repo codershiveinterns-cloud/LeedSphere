@@ -58,16 +58,39 @@ const getSocketToken = async () => {
 /**
  * Socket.IO client. Same origin as the REST API (resolved from VITE_API_URL).
  *
- * `transports: ['websocket']` skips the long-poll fallback — Render and most
- * modern hosts handle pure ws fine, and we avoid the noisy polling probes
- * on the network tab. If you ever need the fallback (corp proxies that
- * block ws), drop the `transports` line.
+ * Transport order: polling FIRST, then upgrade to websocket. This is the
+ * Socket.IO default and the right choice for production behind a Render /
+ * Vercel-style proxy:
+ *   - Some Render edges drop the websocket Upgrade header on cold starts,
+ *     so a websocket-only client gets stuck on "WebSocket connection failed"
+ *     with a 404 on /socket.io/. Polling always works → handshake succeeds
+ *     → the connection upgrades to ws as soon as the proxy is happy.
+ *   - In dev (localhost) the upgrade is instant; you'll see a polling probe
+ *     for ~50ms then ws takes over.
+ *
+ * `path: '/socket.io'` matches the server. `withCredentials: true` lets the
+ * cookie+CORS dance work for the auth handshake.
  */
 export const socket = io(SOCKET_URL, {
+  path: '/socket.io',
+  transports: ['polling', 'websocket'],
   auth: async (cb) => cb({ token: await getSocketToken() }),
-  transports: ['websocket'],
   withCredentials: true,
   autoConnect: true,
+});
+
+// Diagnostic — one console line tells you whether the connection succeeded
+// and which transport it landed on (polling vs. websocket).
+socket.on('connect', () => {
+  const transport = socket.io?.engine?.transport?.name;
+  console.info('[socket] connected', { id: socket.id, transport, url: SOCKET_URL });
+  socket.io?.engine?.on?.('upgrade', (t) => {
+    console.info('[socket] upgraded transport →', t?.name);
+  });
+});
+
+socket.on('disconnect', (reason) => {
+  console.info('[socket] disconnected', { reason });
 });
 
 export const reconnectSocket = () => {
