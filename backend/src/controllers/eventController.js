@@ -29,8 +29,8 @@ export const createEvent = async (req, res) => {
     });
 
     const populated = await Event.findById(event._id)
-      .populate('createdBy', 'name avatar')
-      .populate('assignedTo', 'name avatar');
+      .populate('createdBy', 'name avatar profileImage')
+      .populate('assignedTo', 'name avatar profileImage');
 
     // Notify every assignee (except the creator) that they've been added.
     try {
@@ -64,8 +64,8 @@ export const createEvent = async (req, res) => {
 export const getEvents = async (req, res) => {
   try {
     const events = await Event.find({ workspaceId: req.params.workspaceId })
-      .populate('createdBy', 'name avatar')
-      .populate('assignedTo', 'name avatar')
+      .populate('createdBy', 'name avatar profileImage')
+      .populate('assignedTo', 'name avatar profileImage')
       .sort({ startDate: 1 });
     res.json(events);
   } catch (err) {
@@ -90,8 +90,8 @@ export const updateEvent = async (req, res) => {
     await event.save();
 
     const populated = await Event.findById(event._id)
-      .populate('createdBy', 'name avatar')
-      .populate('assignedTo', 'name avatar');
+      .populate('createdBy', 'name avatar profileImage')
+      .populate('assignedTo', 'name avatar profileImage');
     res.json(populated);
   } catch (err) {
     res.status(500).json({ message: err.message });

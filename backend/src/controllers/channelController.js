@@ -177,11 +177,11 @@ export const getChannelsByWorkspace = async (req, res) => {
 export const getChannelMembers = async (req, res) => {
   try {
     const channel = await Channel.findById(req.params.id)
-      .populate('members', 'name email avatar')
-      .populate('createdBy', 'name email avatar');
+      .populate('members', 'name email avatar profileImage')
+      .populate('createdBy', 'name email avatar profileImage');
     if (!channel) return res.status(404).json({ message: 'Channel not found' });
 
-    const team = await Team.findById(channel.teamId).populate('members.userId', 'name email avatar');
+    const team = await Team.findById(channel.teamId).populate('members.userId', 'name email avatar profileImage');
     if (!team) return res.status(404).json({ message: 'Team not found' });
 
     if (!canAccessChannel(channel, team, req.user._id)) {

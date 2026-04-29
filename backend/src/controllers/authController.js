@@ -13,6 +13,7 @@ const toAuthPayload = (user, token) => ({
   name: user.name,
   email: user.email,
   avatar: user.avatar,
+  profileImage: user.profileImage || null,
   token,
 });
 

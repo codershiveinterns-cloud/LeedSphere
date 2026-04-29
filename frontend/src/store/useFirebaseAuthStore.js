@@ -93,6 +93,15 @@ const useFirebaseAuthStore = create((set, get) => ({
   },
 
   /**
+   * Patch a single field on the cached Mongo profile in-place. Used by the
+   * profile-image flow so the avatar updates everywhere immediately without
+   * a full /auth/me refetch.
+   */
+  patchProfile: (patch) => set((state) => ({
+    profile: state.profile ? { ...state.profile, ...patch } : state.profile,
+  })),
+
+  /**
    * Manually re-pull the user (verification flips don't fire
    * onAuthStateChanged). Same identity guard as above.
    */

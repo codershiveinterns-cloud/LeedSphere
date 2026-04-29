@@ -94,7 +94,7 @@ export const getMyPendingInvites = async (req, res) => {
   try {
     const invites = await Invite.find({ email: req.user.email, status: 'pending' })
       .populate('teamId', 'name description')
-      .populate('invitedBy', 'name avatar')
+      .populate('invitedBy', 'name avatar profileImage')
       .sort({ createdAt: -1 });
     res.json(invites);
   } catch (err) {
@@ -167,7 +167,7 @@ export const acceptInvite = async (req, res) => {
       teamId: team._id,
     });
 
-    const populated = await Team.findById(team._id).populate('members.userId', 'name email avatar');
+    const populated = await Team.findById(team._id).populate('members.userId', 'name email avatar profileImage');
     res.json({ invite, team: populated });
   } catch (err) {
     res.status(500).json({ message: err.message });

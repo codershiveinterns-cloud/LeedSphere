@@ -9,6 +9,8 @@ import useCurrentTeamStore from '../../store/useCurrentTeamStore';
 import { logOut as firebaseLogOut } from '../../services/authService';
 import Modal from './Modal';
 import CreateChannelForm from '../channel/CreateChannelForm';
+import ProfileSettingsModal from './ProfileSettingsModal';
+import Avatar from './Avatar';
 import toast from 'react-hot-toast';
 
 /**
@@ -32,7 +34,10 @@ const Header = ({ onMenuClick }) => {
   const [activeNotifTab, setActiveNotifTab] = useState('All');
   const [showCreateTeamModal, setShowCreateTeamModal] = useState(false);
   const [showCreateChannelModal, setShowCreateChannelModal] = useState(false);
+  const [showProfileSettings, setShowProfileSettings] = useState(false);
   const [newTeamName, setNewTeamName] = useState('');
+
+  const profile = useFirebaseAuthStore((s) => s.profile);
 
   const plusRef = useRef(null);
   const notifRef = useRef(null);
@@ -290,12 +295,15 @@ const Header = ({ onMenuClick }) => {
             )}
           </div>
 
-          <div className="flex items-center gap-3 pl-4 border-l border-slate-200 dark:border-gray-800">
-            <div className="w-7 h-7 rounded-full bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center text-xs font-bold text-white shadow-sm ring-2 ring-white dark:ring-[#0d1117]">
-              {(user?.displayName || user?.email || '?').charAt(0).toUpperCase()}
-            </div>
+          <button
+            type="button"
+            onClick={() => setShowProfileSettings(true)}
+            className="flex items-center gap-3 pl-4 border-l border-slate-200 dark:border-gray-800 hover:opacity-90 transition-opacity"
+            title="Profile settings"
+          >
+            <Avatar user={profile} size="xs" className="ring-2 ring-white dark:ring-[#0d1117] !w-7 !h-7" />
             <span className="text-sm font-medium text-slate-700 dark:text-gray-200 hidden md:block">{user?.displayName || user?.email}</span>
-          </div>
+          </button>
           <button onClick={handleLogout} title="Sign out" className="flex items-center gap-2 text-sm font-medium text-slate-500 dark:text-gray-400 hover:text-red-500 dark:hover:text-red-400 transition-colors ml-2 active:scale-90"><LogOut size={16} /></button>
         </div>
       </header>
@@ -313,6 +321,8 @@ const Header = ({ onMenuClick }) => {
           </div>
         </form>
       </Modal>
+
+      <ProfileSettingsModal isOpen={showProfileSettings} onClose={() => setShowProfileSettings(false)} />
 
       <Modal isOpen={showCreateChannelModal} onClose={() => setShowCreateChannelModal(false)} title="Create Channel">
         <CreateChannelForm

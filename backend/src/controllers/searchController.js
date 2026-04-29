@@ -72,7 +72,7 @@ export const globalSearch = async (req, res) => {
         .lean(),
 
       User.find(userFilter)
-        .select('name email avatar')
+        .select('name email avatar profileImage')
         .limit(limit)
         .lean(),
     ]);

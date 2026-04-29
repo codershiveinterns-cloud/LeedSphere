@@ -14,12 +14,12 @@ export const createConversation = async (req, res) => {
       members: { $all: members, $size: 2 },
     });
     if (existing) {
-      const populated = await Conversation.findById(existing._id).populate('members', 'name email avatar');
+      const populated = await Conversation.findById(existing._id).populate('members', 'name email avatar profileImage');
       return res.json(populated);
     }
 
     const conversation = await Conversation.create({ members });
-    const populated = await Conversation.findById(conversation._id).populate('members', 'name email avatar');
+    const populated = await Conversation.findById(conversation._id).populate('members', 'name email avatar profileImage');
     res.status(201).json(populated);
   } catch (err) {
     res.status(500).json({ message: err.message });
@@ -30,7 +30,7 @@ export const createConversation = async (req, res) => {
 export const getConversations = async (req, res) => {
   try {
     const conversations = await Conversation.find({ members: req.user._id })
-      .populate('members', 'name email avatar')
+      .populate('members', 'name email avatar profileImage')
       .sort({ lastMessageAt: -1 });
     res.json(conversations);
   } catch (err) {
@@ -57,7 +57,7 @@ export const sendDirectMessage = async (req, res) => {
     conversation.lastMessageAt = new Date();
     await conversation.save();
 
-    const populated = await DirectMessage.findById(dm._id).populate('senderId', 'name avatar');
+    const populated = await DirectMessage.findById(dm._id).populate('senderId', 'name avatar profileImage');
     res.status(201).json(populated);
   } catch (err) {
     res.status(500).json({ message: err.message });
@@ -68,7 +68,7 @@ export const sendDirectMessage = async (req, res) => {
 export const getDirectMessages = async (req, res) => {
   try {
     const messages = await DirectMessage.find({ conversationId: req.params.id })
-      .populate('senderId', 'name avatar')
+      .populate('senderId', 'name avatar profileImage')
       .sort({ createdAt: 1 });
     res.json(messages);
   } catch (err) {

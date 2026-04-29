@@ -5,6 +5,8 @@ import useAppStore from '../store/useAppStore';
 import useCurrentTeamStore from '../store/useCurrentTeamStore';
 import Modal from '../components/common/Modal';
 import CreateChannelForm from '../components/channel/CreateChannelForm';
+import Avatar from '../components/common/Avatar';
+import TeamSettingsModal from '../components/common/TeamSettingsModal';
 import toast from 'react-hot-toast';
 
 const DESIGNATIONS = [
@@ -55,6 +57,7 @@ const TeamDetails = () => {
   const [inviteDesignation, setInviteDesignation] = useState('');
   const [inviting, setInviting] = useState(false);
   const [showCreateChannel, setShowCreateChannel] = useState(false);
+  const [showTeamSettings, setShowTeamSettings] = useState(false);
 
   const resolvedTeam = (activeTeam?._id === id) ? activeTeam : teams.find(t => t._id === id) || activeTeam;
 
@@ -213,7 +216,7 @@ const TeamDetails = () => {
                 const BadgeIcon = badge.icon;
                 return (
                   <div key={member.id} className="flex items-center gap-4 p-3 hover:bg-slate-100 dark:hover:bg-[#1c212b] rounded-lg transition-colors border border-transparent hover:border-slate-200 dark:hover:border-gray-800 group">
-                    <img src={member.avatar} className="w-10 h-10 rounded-full object-cover" alt={member.name} />
+                    <Avatar user={member} size="md" />
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2">
                         <h4 className="font-semibold text-slate-900 dark:text-gray-200 truncate">{member.name}</h4>
@@ -417,7 +420,7 @@ const TeamDetails = () => {
             </div>
             <div className="flex gap-2 mb-2">
               <button onClick={() => setShowInviteModal(true)} className="bg-indigo-600 hover:bg-indigo-500 text-white px-4 py-2 rounded-lg text-sm font-medium shadow-sm flex items-center gap-2 transition-colors active:scale-95"><Mail size={16} /> Invite</button>
-              <button className="p-2 bg-slate-200 dark:bg-gray-800 hover:bg-slate-300 dark:hover:bg-gray-700 text-slate-700 dark:text-gray-300 rounded-lg transition-colors active:scale-90"><Settings size={18} /></button>
+              <button onClick={() => setShowTeamSettings(true)} title="Team settings" className="p-2 bg-slate-200 dark:bg-gray-800 hover:bg-slate-300 dark:hover:bg-gray-700 text-slate-700 dark:text-gray-300 rounded-lg transition-colors active:scale-90"><Settings size={18} /></button>
             </div>
           </div>
 
@@ -512,6 +515,15 @@ const TeamDetails = () => {
           </div>
         </form>
       </Modal>
+
+      <TeamSettingsModal
+        isOpen={showTeamSettings}
+        onClose={() => setShowTeamSettings(false)}
+        team={resolvedTeam}
+        members={members}
+        invites={pendingInvitesList}
+        onTeamDeleted={() => navigate('/dashboard/teams')}
+      />
 
       {/* Delete-invite confirmation. Modal closes on Cancel; Delete keeps it
           open until the API call resolves so the spinner stays visible. */}

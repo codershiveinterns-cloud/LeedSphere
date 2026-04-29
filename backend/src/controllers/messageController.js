@@ -51,7 +51,7 @@ export const sendMessage = async (req, res) => {
       await Message.findByIdAndUpdate(threadId, { $inc: { replyCount: 1 } });
     }
 
-    const populated = await Message.findById(message._id).populate('senderId', 'name avatar');
+    const populated = await Message.findById(message._id).populate('senderId', 'name avatar profileImage');
     res.status(201).json(populated);
   } catch (err) {
     res.status(500).json({ message: err.message });
@@ -73,7 +73,7 @@ export const getMessagesByChannel = async (req, res) => {
     };
     const messages = await Message.find(filter)
       .sort({ createdAt: 1 })
-      .populate('senderId', 'name avatar')
+      .populate('senderId', 'name avatar profileImage')
       .populate('reactions.userId', 'name');
     res.json(messages);
   } catch (err) {
@@ -85,7 +85,7 @@ export const getMessagesByChannel = async (req, res) => {
 export const getThreadReplies = async (req, res) => {
   try {
     const parent = await Message.findById(req.params.messageId)
-      .populate('senderId', 'name avatar')
+      .populate('senderId', 'name avatar profileImage')
       .populate('reactions.userId', 'name');
     if (!parent) return res.status(404).json({ message: 'Message not found' });
 
@@ -96,7 +96,7 @@ export const getThreadReplies = async (req, res) => {
 
     const replies = await Message.find({ threadId: req.params.messageId })
       .sort({ createdAt: 1 })
-      .populate('senderId', 'name avatar')
+      .populate('senderId', 'name avatar profileImage')
       .populate('reactions.userId', 'name');
     res.json({ parent, replies });
   } catch (err) {
@@ -127,7 +127,7 @@ export const editMessage = async (req, res) => {
     await message.save();
 
     const populated = await Message.findById(message._id)
-      .populate('senderId', 'name avatar')
+      .populate('senderId', 'name avatar profileImage')
       .populate('reactions.userId', 'name');
     res.json(populated);
   } catch (err) {
@@ -184,7 +184,7 @@ export const toggleReaction = async (req, res) => {
     await message.save();
 
     const populated = await Message.findById(message._id)
-      .populate('senderId', 'name avatar')
+      .populate('senderId', 'name avatar profileImage')
       .populate('reactions.userId', 'name');
     res.json(populated);
   } catch (err) {

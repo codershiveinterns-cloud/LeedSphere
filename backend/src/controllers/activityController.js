@@ -4,7 +4,7 @@ import Activity from '../models/Activity.js';
 export const getActivityByTeam = async (req, res) => {
   try {
     const activities = await Activity.find({ teamId: req.params.teamId })
-      .populate('userId', 'name avatar')
+      .populate('userId', 'name avatar profileImage')
       .sort({ createdAt: -1 })
       .limit(50);
     res.json(activities);
@@ -17,7 +17,7 @@ export const getActivityByTeam = async (req, res) => {
 export const getMyActivity = async (req, res) => {
   try {
     const activities = await Activity.find({ userId: req.user._id })
-      .populate('userId', 'name avatar')
+      .populate('userId', 'name avatar profileImage')
       .sort({ createdAt: -1 })
       .limit(50);
     res.json(activities);
@@ -39,7 +39,7 @@ export const createActivity = async (req, res) => {
       meta: meta || {},
     });
 
-    const populated = await Activity.findById(activity._id).populate('userId', 'name avatar');
+    const populated = await Activity.findById(activity._id).populate('userId', 'name avatar profileImage');
     res.status(201).json(populated);
   } catch (err) {
     res.status(500).json({ message: err.message });

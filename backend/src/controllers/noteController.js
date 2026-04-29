@@ -15,7 +15,7 @@ export const createNote = async (req, res) => {
       createdBy: req.user._id,
     });
 
-    const populated = await Note.findById(note._id).populate('createdBy', 'name avatar');
+    const populated = await Note.findById(note._id).populate('createdBy', 'name avatar profileImage');
     res.status(201).json(populated);
   } catch (err) {
     res.status(500).json({ message: err.message });
@@ -26,7 +26,7 @@ export const createNote = async (req, res) => {
 export const getNotesByTeam = async (req, res) => {
   try {
     const notes = await Note.find({ teamId: req.params.teamId })
-      .populate('createdBy', 'name avatar')
+      .populate('createdBy', 'name avatar profileImage')
       .sort({ updatedAt: -1 });
     res.json(notes);
   } catch (err) {
@@ -37,7 +37,7 @@ export const getNotesByTeam = async (req, res) => {
 // GET /api/notes/detail/:id
 export const getNoteById = async (req, res) => {
   try {
-    const note = await Note.findById(req.params.id).populate('createdBy', 'name avatar');
+    const note = await Note.findById(req.params.id).populate('createdBy', 'name avatar profileImage');
     if (!note) return res.status(404).json({ message: 'Note not found' });
     res.json(note);
   } catch (err) {
@@ -58,7 +58,7 @@ export const updateNote = async (req, res) => {
     if (parentId !== undefined) note.parentId = parentId;
     await note.save();
 
-    const populated = await Note.findById(note._id).populate('createdBy', 'name avatar');
+    const populated = await Note.findById(note._id).populate('createdBy', 'name avatar profileImage');
     res.json(populated);
   } catch (err) {
     res.status(500).json({ message: err.message });

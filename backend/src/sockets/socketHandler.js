@@ -150,12 +150,12 @@ export const handleSockets = (io) => {
           const parent = await Message.findByIdAndUpdate(threadId, { $inc: { replyCount: 1 } }, { new: true });
           // Broadcast updated parent to channel
           if (parent) {
-            const populatedParent = await Message.findById(parent._id).populate('senderId', 'name avatar').populate('reactions.userId', 'name');
+            const populatedParent = await Message.findById(parent._id).populate('senderId', 'name avatar profileImage').populate('reactions.userId', 'name');
             io.to(channelId).emit('message_updated', populatedParent);
           }
         }
 
-        const populated = await Message.findById(newMessage._id).populate('senderId', 'name avatar');
+        const populated = await Message.findById(newMessage._id).populate('senderId', 'name avatar profileImage');
 
         io.to(channelId).emit('receive_message', populated);
 
@@ -242,7 +242,7 @@ export const handleSockets = (io) => {
         message.edited = true; // legacy alias
         await message.save();
 
-        const populated = await Message.findById(messageId).populate('senderId', 'name avatar').populate('reactions.userId', 'name');
+        const populated = await Message.findById(messageId).populate('senderId', 'name avatar profileImage').populate('reactions.userId', 'name');
         const channelId = message.channelId.toString();
         io.to(channelId).emit('message_updated', populated);
       } catch (error) {
@@ -293,7 +293,7 @@ export const handleSockets = (io) => {
         }
         await message.save();
 
-        const populated = await Message.findById(messageId).populate('senderId', 'name avatar').populate('reactions.userId', 'name');
+        const populated = await Message.findById(messageId).populate('senderId', 'name avatar profileImage').populate('reactions.userId', 'name');
         const channelId = message.channelId.toString();
         io.to(channelId).emit('message_updated', populated);
       } catch (error) {
@@ -323,7 +323,7 @@ export const handleSockets = (io) => {
           lastMessageAt: new Date(),
         });
 
-        const populated = await DirectMessage.findById(dm._id).populate('senderId', 'name avatar');
+        const populated = await DirectMessage.findById(dm._id).populate('senderId', 'name avatar profileImage');
         io.to(`dm_${conversationId}`).emit('receive_dm', populated);
       } catch (error) {
         console.error('send_dm error:', error.message);

@@ -11,7 +11,11 @@ const userSchema = new mongoose.Schema({
   // Legacy JWT users keep theirs and can still sign in via the old flow if
   // re-enabled. minlength only applies when a password is actually present.
   password: { type: String, minlength: 6 },
+  // `avatar` is the legacy auto/google-photo field — kept for backward compat
+  // (existing users + Firebase signin write here). New uploads go to
+  // `profileImage` and the UI prefers that with a static default fallback.
   avatar: { type: String, default: '' },
+  profileImage: { type: String, default: null },
   // Deprecated: authorization is workspace/team membership based.
   // Keep this field only for backward compatibility.
   role: { type: String, enum: ['admin', 'member'], default: undefined, select: false },

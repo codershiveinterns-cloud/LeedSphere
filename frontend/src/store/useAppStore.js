@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import api from '../services/api';
+import { resolveAvatar } from '../lib/avatar';
 
 const useAppStore = create((set, get) => ({
   // ===== Workspaces =====
@@ -191,6 +192,33 @@ const useAppStore = create((set, get) => ({
     }
   },
 
+  updateTeam: async (teamId, patch) => {
+    try {
+      const res = await api.put(`/teams/${teamId}`, patch);
+      set((state) => ({
+        teams: state.teams.map(t => t._id === teamId ? res.data : t),
+        activeTeam: state.activeTeam?._id === teamId ? res.data : state.activeTeam,
+      }));
+      return res.data;
+    } catch (err) {
+      console.error('updateTeam:', err.message);
+      throw err;
+    }
+  },
+
+  leaveTeam: async (teamId, userId) => {
+    try {
+      await api.delete(`/teams/${teamId}/members/${userId}`);
+      set((state) => ({
+        teams: state.teams.filter(t => t._id !== teamId),
+        activeTeam: state.activeTeam?._id === teamId ? null : state.activeTeam,
+      }));
+    } catch (err) {
+      console.error('leaveTeam:', err.message);
+      throw err;
+    }
+  },
+
   deleteTeam: async (teamId) => {
     try {
       await api.delete(`/teams/${teamId}`);
@@ -245,7 +273,8 @@ const useAppStore = create((set, get) => ({
       id: m.userId?._id || m.userId,
       name: m.userId?.name || 'Unknown',
       email: m.userId?.email || '',
-      avatar: m.userId?.avatar || `https://i.pravatar.cc/150?u=${m.userId?._id || m.userId}`,
+      profileImage: m.userId?.profileImage || null,
+      avatar: resolveAvatar(m.userId),
       role: m.role,
       designation: m.designation || '',
       status: 'online',
@@ -800,7 +829,7 @@ const useAppStore = create((set, get) => ({
       (t.members || []).map(m => ({
         id: m.userId?._id || m.userId,
         name: m.userId?.name || 'Unknown',
-        avatar: m.userId?.avatar || `https://i.pravatar.cc/150?u=${m.userId?._id}`,
+        avatar: resolveAvatar(m.userId),
         title: m.role,
         teamId: t._id,
       }))

@@ -37,7 +37,7 @@ export const createTeam = async (req, res) => {
       teamId: team._id,
     });
 
-    const populated = await Team.findById(team._id).populate('members.userId', 'name email avatar');
+    const populated = await Team.findById(team._id).populate('members.userId', 'name email avatar profileImage');
     res.status(201).json(populated);
   } catch (err) {
     res.status(500).json({ message: err.message });
@@ -52,7 +52,7 @@ export const getTeams = async (req, res) => {
     if (workspaceId) filter.workspaceId = workspaceId;
     filter['members.userId'] = req.user._id;
 
-    const teams = await Team.find(filter).populate('members.userId', 'name email avatar');
+    const teams = await Team.find(filter).populate('members.userId', 'name email avatar profileImage');
     res.json(teams);
   } catch (err) {
     res.status(500).json({ message: err.message });
@@ -65,7 +65,7 @@ export const getTeamsByWorkspace = async (req, res) => {
     const teams = await Team.find({
       workspaceId: req.params.workspaceId,
       'members.userId': req.user._id,
-    }).populate('members.userId', 'name email avatar');
+    }).populate('members.userId', 'name email avatar profileImage');
     res.json(teams);
   } catch (err) {
     res.status(500).json({ message: err.message });
@@ -75,7 +75,7 @@ export const getTeamsByWorkspace = async (req, res) => {
 // GET /api/teams/detail/:id
 export const getTeamById = async (req, res) => {
   try {
-    const team = await Team.findById(req.params.id).populate('members.userId', 'name email avatar');
+    const team = await Team.findById(req.params.id).populate('members.userId', 'name email avatar profileImage');
     if (!team) return res.status(404).json({ message: 'Team not found' });
     res.json(team);
   } catch (err) {
@@ -135,7 +135,7 @@ export const updateTeam = async (req, res) => {
     if (description !== undefined) team.description = description;
     await team.save();
 
-    const populated = await Team.findById(team._id).populate('members.userId', 'name email avatar');
+    const populated = await Team.findById(team._id).populate('members.userId', 'name email avatar profileImage');
     res.json(populated);
   } catch (err) {
     res.status(500).json({ message: err.message });
@@ -172,7 +172,7 @@ export const addMember = async (req, res) => {
 
     await Activity.create({ userId: req.user._id, action: `Added a member to "${team.name}"`, teamId: team._id });
 
-    const populated = await Team.findById(team._id).populate('members.userId', 'name email avatar');
+    const populated = await Team.findById(team._id).populate('members.userId', 'name email avatar profileImage');
     res.json(populated);
   } catch (err) {
     res.status(500).json({ message: err.message });
@@ -203,7 +203,7 @@ export const updateMember = async (req, res) => {
       teamId: team._id,
     });
 
-    const populated = await Team.findById(team._id).populate('members.userId', 'name email avatar');
+    const populated = await Team.findById(team._id).populate('members.userId', 'name email avatar profileImage');
     res.json(populated);
   } catch (err) {
     res.status(500).json({ message: err.message });
@@ -221,7 +221,7 @@ export const removeMember = async (req, res) => {
 
     await Activity.create({ userId: req.user._id, action: `Removed a member from "${team.name}"`, teamId: team._id });
 
-    const populated = await Team.findById(team._id).populate('members.userId', 'name email avatar');
+    const populated = await Team.findById(team._id).populate('members.userId', 'name email avatar profileImage');
     res.json(populated);
   } catch (err) {
     res.status(500).json({ message: err.message });
@@ -277,7 +277,7 @@ export const mergeTeams = async (req, res) => {
 
     await Activity.create({ userId: req.user._id, action: `Merged "${source.name}" into "${target.name}"`, teamId: target._id });
 
-    const populated = await Team.findById(target._id).populate('members.userId', 'name email avatar');
+    const populated = await Team.findById(target._id).populate('members.userId', 'name email avatar profileImage');
     res.json(populated);
   } catch (err) {
     res.status(500).json({ message: err.message });

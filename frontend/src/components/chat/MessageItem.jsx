@@ -2,6 +2,7 @@ import { useState, useRef, useEffect } from 'react';
 import { MessageSquare, Edit2, Trash2, Smile, Check, X } from 'lucide-react';
 import { socket } from '../../hooks/useSocket';
 import useFirebaseAuthStore from '../../store/useFirebaseAuthStore';
+import Avatar from '../common/Avatar';
 
 const QUICK_EMOJIS = ['👍', '❤️', '😂', '🎉', '🔥', '👀'];
 
@@ -78,13 +79,7 @@ const MessageItem = ({ message, isSequential, isMe, onOpenThread }) => {
       {/* Avatar */}
       <div className="w-10 flex-shrink-0 flex justify-center mt-0.5">
         {!isSequential ? (
-          <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-indigo-100 to-purple-100 dark:from-indigo-500/20 dark:to-purple-500/20 border border-indigo-200 dark:border-indigo-500/10 flex items-center justify-center flex-shrink-0 text-indigo-700 dark:text-indigo-300 font-bold shadow-sm">
-            {message.senderId?.avatar ? (
-              <img src={message.senderId.avatar} className="w-full h-full rounded-xl object-cover" alt="" />
-            ) : (
-              displayName.charAt(0).toUpperCase() || '?'
-            )}
-          </div>
+          <Avatar user={message.senderId} size="md" square className="border border-indigo-200 dark:border-indigo-500/10 shadow-sm" />
         ) : (
           <span className="text-[10px] text-slate-400 dark:text-gray-600 opacity-0 group-hover:opacity-100 mt-1 font-medium select-none text-center">{time}</span>
         )}

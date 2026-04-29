@@ -38,7 +38,7 @@ export const createProject = async (req, res) => {
 export const getProjects = async (req, res) => {
   try {
     const projects = await Project.find({ workspaceId: req.params.workspaceId })
-      .populate('createdBy', 'name avatar')
+      .populate('createdBy', 'name avatar profileImage')
       .populate('teamIds', 'name')
       // Avoid shipping doc payloads in the list response — they can be huge.
       .select('-documents')
