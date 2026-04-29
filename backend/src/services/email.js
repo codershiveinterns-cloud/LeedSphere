@@ -33,7 +33,7 @@ const safeName = (s) => String(s || '').replace(/[<>]/g, '');
  * no extra encoding needed in href. Plain-text fallback included so spam
  * filters and text-only clients render the email correctly.
  */
-const renderInviteHtml = ({ teamName, inviterName, role, inviteUrl, loginUrl }) => `
+const renderInviteHtml = ({ teamName, inviterName, role, inviteUrl, loginUrl, signupUrl }) => `
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><title>You're invited</title></head>
 <body style="margin:0;background:#f5f6f8;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;color:#0f172a;">
@@ -59,13 +59,20 @@ const renderInviteHtml = ({ teamName, inviterName, role, inviteUrl, loginUrl }) 
         <tr><td align="center" style="padding:0 32px 8px 32px;">
           <a href="${inviteUrl}" style="display:inline-block;background:linear-gradient(135deg,#4f46e5,#9333ea);color:#fff;text-decoration:none;font-weight:600;font-size:15px;padding:13px 28px;border-radius:12px;box-shadow:0 8px 16px rgba(99,102,241,0.25);">Accept invite</a>
         </td></tr>
-        <tr><td style="padding:24px 32px 32px 32px;">
+        <tr><td style="padding:24px 32px 8px 32px;">
           <p style="margin:0;color:#64748b;font-size:13px;line-height:1.5;">
             Already have an account?
             <a href="${loginUrl}" style="color:#4f46e5;text-decoration:none;font-weight:600;">Sign in</a> &mdash;
             we'll connect this invite to your existing account.
           </p>
-          <hr style="border:none;border-top:1px solid #e2e8f0;margin:24px 0;">
+          <p style="margin:8px 0 0;color:#64748b;font-size:13px;line-height:1.5;">
+            New to Leedsphere? You can also
+            <a href="${signupUrl}" style="color:#4f46e5;text-decoration:none;font-weight:600;">create an account</a>
+            and use the same email to claim this invite.
+          </p>
+        </td></tr>
+        <tr><td style="padding:16px 32px 32px 32px;">
+          <hr style="border:none;border-top:1px solid #e2e8f0;margin:0 0 16px;">
           <p style="margin:0;color:#94a3b8;font-size:12px;line-height:1.5;">
             If the button above doesn't work, copy this URL into your browser:<br>
             <span style="color:#475569;word-break:break-all;">${inviteUrl}</span>
@@ -77,7 +84,7 @@ const renderInviteHtml = ({ teamName, inviterName, role, inviteUrl, loginUrl }) 
   </table>
 </body></html>`;
 
-const renderInviteText = ({ teamName, inviterName, role, inviteUrl, loginUrl }) => `
+const renderInviteText = ({ teamName, inviterName, role, inviteUrl, loginUrl, signupUrl }) => `
 You're invited to ${teamName || 'a team'} on Leedsphere
 
 ${inviterName || 'Someone'} invited you to join${role ? ` as ${role}` : ''}.
@@ -85,8 +92,11 @@ ${inviterName || 'Someone'} invited you to join${role ? ` as ${role}` : ''}.
 Accept the invite (expires in 24 hours, single-use):
 ${inviteUrl}
 
-Already have an account? Sign in instead — we'll connect this invite automatically:
+Already have an account? Sign in — we'll connect this invite automatically:
 ${loginUrl}
+
+New to Leedsphere? Create an account with the same email:
+${signupUrl}
 
 — Leedsphere
 `;
@@ -97,13 +107,19 @@ ${loginUrl}
  * record still gets created in the DB).
  */
 export const sendInviteEmail = async ({ to, token, teamName, inviterName, role }) => {
-  const inviteLink = `${FRONTEND_URL}/accept-invite/${token}`;
+  // BASE_URL is the production frontend origin. FRONTEND_URL (env) is the
+  // single source of truth; we alias to BASE_URL here to match the link spec.
+  const BASE_URL = FRONTEND_URL || 'https://www.leedsphere.com';
+  const inviteLink = `${BASE_URL}/accept-invite/${token}`;
   const inviteUrl  = inviteLink;
-  const loginUrl   = `${FRONTEND_URL}/login`;
+  const loginUrl   = `${BASE_URL}/login`;
+  const signupUrl  = `${BASE_URL}/signup`;
   console.log('Invite link:', inviteLink);
+  console.log('Login link:', loginUrl);
+  console.log('Signup link:', signupUrl);
 
-  const html = renderInviteHtml({ teamName, inviterName, role, inviteUrl, loginUrl });
-  const text = renderInviteText({ teamName, inviterName, role, inviteUrl, loginUrl });
+  const html = renderInviteHtml({ teamName, inviterName, role, inviteUrl, loginUrl, signupUrl });
+  const text = renderInviteText({ teamName, inviterName, role, inviteUrl, loginUrl, signupUrl });
   const subject = `${inviterName || 'Someone'} invited you to ${teamName || 'a team'} on Leedsphere`;
 
   const c = client();
