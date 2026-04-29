@@ -16,7 +16,7 @@
 import { Resend } from 'resend';
 
 const RESEND_API_KEY = process.env.RESEND_API_KEY || '';
-const FRONTEND_URL   = (process.env.FRONTEND_URL || 'http://localhost:5173').replace(/\/+$/, '');
+const FRONTEND_URL   = (process.env.FRONTEND_URL || 'https://www.leedsphere.com').replace(/\/+$/, '');
 const MAIL_FROM      = process.env.MAIL_FROM || 'Leedsphere <noreply@leedsphere.com>';
 
 let _client = null;
@@ -97,8 +97,10 @@ ${loginUrl}
  * record still gets created in the DB).
  */
 export const sendInviteEmail = async ({ to, token, teamName, inviterName, role }) => {
-  const inviteUrl = `${FRONTEND_URL}/accept-invite/${token}`;
-  const loginUrl  = `${FRONTEND_URL}/login`;
+  const inviteLink = `${FRONTEND_URL}/accept-invite/${token}`;
+  const inviteUrl  = inviteLink;
+  const loginUrl   = `${FRONTEND_URL}/login`;
+  console.log('Invite link:', inviteLink);
 
   const html = renderInviteHtml({ teamName, inviterName, role, inviteUrl, loginUrl });
   const text = renderInviteText({ teamName, inviterName, role, inviteUrl, loginUrl });
