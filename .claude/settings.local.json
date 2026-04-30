@@ -1,0 +1,16 @@
+{
+  "permissions": {
+    "allow": [
+      "Read(//c/Users/dhire/smartsoft/src/app/**)",
+      "Read(//c/Users/dhire/smartsoft/src/components/**)",
+      "Read(//c/Users/dhire/smartsoft/src/**)",
+      "Bash(grep -v \":0$\")",
+      "Bash(sort -t: -k2 -nr)",
+      "Bash(npx --no-install eslint src/pages/marketing/ContentPage.jsx src/components/marketing/MarketingPage.jsx)"
+    ],
+    "additionalDirectories": [
+      "c:\\Users\\dhire\\smartsoft\\src\\components",
+      "c:\\Users\\dhire\\smartsoft\\src\\app\\payment"
+    ]
+  }
+}

@@ -28,7 +28,7 @@ const MarketingPage = ({ eyebrow, title, tagline, children }) => (
         )}
         <h1 className="text-4xl sm:text-5xl font-bold tracking-tight leading-tight text-slate-900 dark:text-white">{title}</h1>
         {tagline && (
-          <p className="mt-5 text-lg text-slate-600 dark:text-slate-400 leading-relaxed max-w-2xl mx-auto">{tagline}</p>
+          <p className="mt-5 text-lg text-slate-600 dark:text-slate-200 leading-relaxed max-w-2xl mx-auto">{tagline}</p>
         )}
       </div>
     </section>

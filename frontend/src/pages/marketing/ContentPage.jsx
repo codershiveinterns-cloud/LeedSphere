@@ -47,11 +47,11 @@ const SectionRenderer = ({ section }) => {
           <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4 not-prose">
             {(section.cards || []).map(({ icon: Icon, title, body }) => (
               <Card key={title}>
-                <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-indigo-50 to-purple-50 border border-indigo-100 flex items-center justify-center text-indigo-600 mb-4">
+                <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-indigo-50 to-purple-50 dark:from-indigo-500/15 dark:to-purple-500/15 border border-indigo-100 dark:border-indigo-400/30 flex items-center justify-center text-indigo-600 dark:text-indigo-300 mb-4">
                   {Icon ? <Icon size={18} /> : null}
                 </div>
-                <h3 className="text-base font-semibold text-slate-900 mb-1">{title}</h3>
-                <p className="text-sm text-slate-600 leading-relaxed">{body}</p>
+                <h3 className="text-base font-semibold text-slate-900 dark:text-white mb-1">{title}</h3>
+                <p className="text-sm text-slate-600 dark:text-slate-200 leading-relaxed">{body}</p>
               </Card>
             ))}
           </div>
@@ -63,7 +63,7 @@ const SectionRenderer = ({ section }) => {
         <Section heading={section.heading}>
           <ul className="not-prose space-y-2.5">
             {(section.items || []).map((item, i) => (
-              <li key={i} className="flex items-start gap-3 text-slate-600">
+              <li key={i} className="flex items-start gap-3 text-slate-700 dark:text-slate-200">
                 <CheckCircle2 size={18} className="text-emerald-500 mt-0.5 shrink-0" />
                 <span>{item}</span>
               </li>
@@ -82,8 +82,8 @@ const SectionRenderer = ({ section }) => {
                   {i + 1}
                 </div>
                 <div>
-                  <h3 className="text-base font-semibold text-slate-900 mb-1">{step.title}</h3>
-                  <p className="text-sm text-slate-600 leading-relaxed">{step.body}</p>
+                  <h3 className="text-base font-semibold text-slate-900 dark:text-white mb-1">{step.title}</h3>
+                  <p className="text-sm text-slate-600 dark:text-slate-200 leading-relaxed">{step.body}</p>
                 </div>
               </li>
             ))}
@@ -96,12 +96,12 @@ const SectionRenderer = ({ section }) => {
         <Section heading={section.heading}>
           <div className="not-prose space-y-3">
             {(section.items || []).map((item, i) => (
-              <details key={i} className="group bg-white rounded-2xl border border-slate-200 hover:border-indigo-200 transition-colors">
+              <details key={i} className="group bg-white dark:bg-slate-800/60 rounded-2xl border border-slate-200 dark:border-slate-700 hover:border-indigo-200 dark:hover:border-indigo-400/40 transition-colors duration-200">
                 <summary className="cursor-pointer list-none p-5 flex items-center justify-between gap-4">
-                  <span className="font-semibold text-slate-900">{item.q}</span>
-                  <span className="w-7 h-7 rounded-lg bg-slate-100 flex items-center justify-center text-slate-500 group-open:rotate-45 transition-transform">+</span>
+                  <span className="font-semibold text-slate-900 dark:text-white">{item.q}</span>
+                  <span className="w-7 h-7 rounded-lg bg-slate-100 dark:bg-slate-700 flex items-center justify-center text-slate-600 dark:text-slate-200 group-open:rotate-45 transition-transform">+</span>
                 </summary>
-                <div className="px-5 pb-5 -mt-1 text-sm text-slate-600 leading-relaxed">{item.a}</div>
+                <div className="px-5 pb-5 -mt-1 text-sm text-slate-600 dark:text-slate-200 leading-relaxed">{item.a}</div>
               </details>
             ))}
           </div>
@@ -117,7 +117,7 @@ const SectionRenderer = ({ section }) => {
             {section.button && (
               <Link
                 to={section.button.to}
-                className="mt-6 inline-flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-semibold text-indigo-700 bg-white hover:bg-indigo-50 shadow-lg transition-all active:scale-[0.98]"
+                className="mt-6 inline-flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-semibold text-indigo-700 bg-white hover:bg-indigo-50 shadow-lg transition-all duration-200 active:scale-[0.98]"
               >
                 {section.button.label} <ArrowRight size={14} />
               </Link>
@@ -129,8 +129,8 @@ const SectionRenderer = ({ section }) => {
     case 'quote':
       return (
         <section className="not-prose">
-          <figure className="rounded-2xl border border-slate-200 bg-slate-50/60 p-8 sm:p-10">
-            <blockquote className="text-xl sm:text-2xl font-semibold text-slate-900 leading-snug">
+          <figure className="rounded-2xl border border-slate-200 dark:border-slate-700 bg-slate-50/60 dark:bg-slate-800/60 p-8 sm:p-10">
+            <blockquote className="text-xl sm:text-2xl font-semibold text-slate-900 dark:text-white leading-snug">
               &ldquo;{section.quote}&rdquo;
             </blockquote>
             {section.attribution && (
@@ -141,8 +141,8 @@ const SectionRenderer = ({ section }) => {
                   </span>
                 )}
                 <span>
-                  <span className="font-semibold text-slate-900">{section.attribution}</span>
-                  {section.role && <span className="text-slate-500">, {section.role}</span>}
+                  <span className="font-semibold text-slate-900 dark:text-white">{section.attribution}</span>
+                  {section.role && <span className="text-slate-600 dark:text-slate-300">, {section.role}</span>}
                 </span>
               </figcaption>
             )}
@@ -155,12 +155,12 @@ const SectionRenderer = ({ section }) => {
         <Section heading={section.heading}>
           <div className={`grid not-prose ${section.items?.length === 4 ? 'grid-cols-2 lg:grid-cols-4' : 'grid-cols-2 lg:grid-cols-3'} gap-4`}>
             {(section.items || []).map((stat, i) => (
-              <div key={i} className="bg-white rounded-2xl border border-slate-200 p-6 text-center shadow-sm">
-                <div className="text-3xl sm:text-4xl font-bold bg-gradient-to-br from-indigo-600 to-purple-600 bg-clip-text text-transparent">
+              <div key={i} className="bg-white dark:bg-slate-800/60 rounded-2xl border border-slate-200 dark:border-slate-700 p-6 text-center shadow-sm dark:shadow-black/20">
+                <div className="text-3xl sm:text-4xl font-bold bg-gradient-to-br from-indigo-600 to-purple-600 dark:from-indigo-400 dark:to-purple-400 bg-clip-text text-transparent">
                   {stat.value}
                 </div>
-                <div className="mt-1 text-sm font-medium text-slate-700">{stat.label}</div>
-                {stat.body && <div className="mt-2 text-xs text-slate-500 leading-relaxed">{stat.body}</div>}
+                <div className="mt-1 text-sm font-medium text-slate-700 dark:text-white">{stat.label}</div>
+                {stat.body && <div className="mt-2 text-xs text-slate-600 dark:text-slate-300 leading-relaxed">{stat.body}</div>}
               </div>
             ))}
           </div>
